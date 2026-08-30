@@ -75,6 +75,7 @@
   
   <script>
     window.addEventListener('error', function(e) {
+      if (e.message === 'Script error.' && !e.filename) return;
       var b = document.getElementById('debug-error-banner');
       if (b) {
         b.style.display = 'block';
@@ -153,6 +154,7 @@
     const PieChartIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>;
     const BarChartIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>;
     const ActivityIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>;
+    const LogOutIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>;
 
     // RFC 5545 RRULE Parser Universal com suporte a COUNT e Parcelamento
     const projectRRuleOccurrences = (pattern, startDateStr, endDateStr) => {
@@ -310,13 +312,13 @@
       });
 
       const [hideValues, setHideValues] = useState(() => localStorage.getItem('fin_privacy') === 'true');
-      const [isAuthenticated, setIsAuthenticated] = useState(() => localStorage.getItem('fin_bio_enabled') !== 'true');
+      const [isAuthenticated, setIsAuthenticated] = useState(false);
       const [bioPrompting, setBioPrompting] = useState(false);
       const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
-      // Nomes Personalizáveis (Zero Hardcode)
-      const [ownerName, setOwnerName] = useState(() => localStorage.getItem('fin_owner_name') || 'Edvan');
-      const [partnerName, setPartnerName] = useState(() => localStorage.getItem('fin_partner_name') || 'Yasmin');
+      // Nomes Personalizáveis (Zero Hardcode - Dinâmico por Família / Usuário)
+      const [ownerName, setOwnerName] = useState(() => localStorage.getItem('fin_owner_name') || '');
+      const [partnerName, setPartnerName] = useState(() => localStorage.getItem('fin_partner_name') || '');
       const [onboardingCompleted, setOnboardingCompleted] = useState(() => localStorage.getItem('fin_onboarding_completed') === 'true');
 
       const hoje = new Date();
@@ -344,6 +346,16 @@
         'sb_publishable_-KY6IgO7_OVAV9EG9KUsOQ_CuX8mKmd'
       );
       
+      const supabase = useMemo(() => {
+        if (!supabaseUrl || !supabaseKey || !createClient) return null;
+        try {
+          return createClient(supabaseUrl, supabaseKey);
+        } catch(e) {
+          console.warn("Aviso ao instanciar Supabase Client:", e);
+          return null;
+        }
+      }, [supabaseUrl, supabaseKey]);
+
       const [accounts, setAccounts] = useState(() => {
         const saved = localStorage.getItem('fin_acc_v3');
         return saved ? JSON.parse(saved) : [];
@@ -386,6 +398,50 @@
       const [modalReavaliacao, setModalReavaliacao] = useState({ show: false, account: null });
       const [modalOrcamento, setModalOrcamento] = useState({ show: false, account: null, currentAmount: 0, isCustom: false });
       const [modalEditarVencimento, setModalEditarVencimento] = useState({ show: false, item: null, novoValor: 0, novaData: '', novaDescricao: '', modoRecorrencia: 'todas' });
+      const [familias, setFamilias] = useState([]);
+      const [familiaAtiva, setFamiliaAtiva] = useState(null);
+      const [membrosFamilia, setMembrosFamilia] = useState([]);
+      const [modalConvite, setModalConvite] = useState({ show: false, tab: 'gerar', codigoGerado: '', codigoParaEntrar: '', emailConvidado: '', nomeExibicao: '', loading: false });
+      const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+      const [adminMetrics, setAdminMetrics] = useState(null);
+      const [adminLoading, setAdminLoading] = useState(false);
+      const [migracaoForm, setMigracaoForm] = useState({ emailEdvan: 'edvan2108@gmail.com', emailYasmin: 'yasmin.inaciomichels@gmail.com', loading: false, result: null });
+      const [adminSearch, setAdminSearch] = useState('');
+
+      // Autenticação Unificada, Recuperação de Senha & MFA Interception
+      const [authUser, setAuthUser] = useState(null);
+      const [authMode, setAuthMode] = useState('login'); // 'login' | 'cadastro' | 'esqueci_senha' | 'redefinir_senha'
+      const [authEmail, setAuthEmail] = useState('');
+      const [authPassword, setAuthPassword] = useState('');
+      const [authNome, setAuthNome] = useState('');
+      const [authNovaSenha, setAuthNovaSenha] = useState('');
+      const [authConfirmaSenha, setAuthConfirmaSenha] = useState('');
+      const [authLoading, setAuthLoading] = useState(false);
+      const [loginAttempts, setLoginAttempts] = useState(0);
+      const [lockUntil, setLockUntil] = useState(0);
+      const [mfaRequired, setMfaRequired] = useState(false);
+      const [mfaCode, setMfaCode] = useState('');
+      const [mfaLoading, setMfaLoading] = useState(false);
+      const [tempAuthUser, setTempAuthUser] = useState(null);
+
+      // Perfil do Usuário ("Meu Perfil")
+      const [userProfile, setUserProfile] = useState(() => {
+        const saved = localStorage.getItem('fin_user_profile');
+        return saved ? JSON.parse(saved) : {
+          avatar_url: '',
+          nome: '',
+          nome_completo: '',
+          profissao: '',
+          telefone: '',
+          endereco: '',
+          email: ''
+        };
+      });
+      const [profileSaving, setProfileSaving] = useState(false);
+      const [uploadingAvatar, setUploadingAvatar] = useState(false);
+      const [emailChangeNotice, setEmailChangeNotice] = useState('');
+      const fileInputRef = useRef(null);
+      const [configTab, setConfigTab] = useState('perfil'); // 'perfil' | 'familia'
       const [zbbAbaAtiva, setZbbAbaAtiva] = useState('despesas'); // 'despesas' | 'receitas'
       const [filtroTitularZbb, setFiltroTitularZbb] = useState('ambos'); // 'ambos' | 'owner' | 'partner'
       const [filtroZbbStatus, setFiltroZbbStatus] = useState('todos'); // 'todos' | 'com_orcamento' | 'sem_orcamento'
@@ -565,7 +621,11 @@
               onboarding_decision: 'smart_defaults',
               updated_at: new Date().toISOString()
             });
-            const { error: insErr } = await supabase.from('accounts').insert(defaultAccounts);
+            const defaultAccountsWithFam = defaultAccounts.map(a => ({
+              ...a,
+              familia_id: familiaAtiva?.id || null
+            }));
+            const { error: insErr } = await supabase.from('accounts').insert(defaultAccountsWithFam);
             if (insErr) {
               console.warn("Aviso na inserção direta, aplicando RPC...", insErr);
               await supabase.rpc('seed_default_accounts_for_current_user');
@@ -615,41 +675,32 @@
         return () => clearInterval(timer);
       }, [deleteModal.show]);
 
-      const supabase = useMemo(() => {
-        if (!supabaseUrl || !supabaseKey || !window.supabase?.createClient) return null;
-        try {
-          return window.supabase.createClient(supabaseUrl, supabaseKey);
-        } catch (e) {
-          return null;
+      const normalizarItemTitular = (item) => {
+        if (!item) return item;
+        const tTitular = (item.titular || '').trim().toLowerCase();
+        const desc = (item.description || item.name || '').toLowerCase();
+        if (partnerName && (tTitular === partnerName.toLowerCase() || desc.includes(partnerName.toLowerCase()))) {
+          if (item.ownership_type === 'owner_only' || !item.ownership_type) {
+            return { ...item, ownership_type: 'partner_only' };
+          }
         }
-      }, [supabaseUrl, supabaseKey]);
+        if (ownerName && (tTitular === ownerName.toLowerCase() || desc.includes(ownerName.toLowerCase()))) {
+          if (item.ownership_type === 'partner_only' || !item.ownership_type) {
+            return { ...item, ownership_type: 'owner_only' };
+          }
+        }
+        if (tTitular === 'ambos' && !item.ownership_type) {
+          return { ...item, ownership_type: 'shared_50_50' };
+        }
+        return item;
+      };
+
+      const normalizarLista = (list) => {
+        if (!Array.isArray(list)) return [];
+        return list.map(normalizarItemTitular);
+      };
 
       const carregarDados = async () => {
-        const normalizarItemTitular = (item) => {
-          if (!item) return item;
-          const tTitular = (item.titular || '').trim().toLowerCase();
-          const desc = (item.description || item.name || '').toLowerCase();
-          if (tTitular === 'yasmin' || tTitular === (partnerName || 'yasmin').toLowerCase() || desc.includes('yasmin')) {
-            if (item.ownership_type === 'owner_only' || !item.ownership_type) {
-              return { ...item, ownership_type: 'partner_only' };
-            }
-          }
-          if (tTitular === 'edvan' || tTitular === (ownerName || 'edvan').toLowerCase() || desc.includes('edvan')) {
-            if (item.ownership_type === 'partner_only' || !item.ownership_type) {
-              return { ...item, ownership_type: 'owner_only' };
-            }
-          }
-          if (tTitular === 'ambos' && !item.ownership_type) {
-            return { ...item, ownership_type: 'shared_50_50' };
-          }
-          return item;
-        };
-
-        const normalizarLista = (list) => {
-          if (!Array.isArray(list)) return [];
-          return list.map(normalizarItemTitular);
-        };
-
         if (!supabase) {
           const locAcc = localStorage.getItem('fin_acc_v3');
           const locTrans = localStorage.getItem('fin_trans_v3');
@@ -659,6 +710,7 @@
           const locVal = localStorage.getItem('fin_invest_val_v3');
           const locOwner = localStorage.getItem('fin_owner_name');
           const locPartner = localStorage.getItem('fin_partner_name');
+
           if (locAcc) setAccounts(JSON.parse(locAcc));
           if (locTrans) setTransactions(normalizarLista(JSON.parse(locTrans)));
           if (locPost) setPostings(JSON.parse(locPost));
@@ -671,50 +723,962 @@
         }
 
         try {
-          const [accRes, transRes, postRes, budgRes, recRes, setRes, valRes] = await Promise.all([
-            supabase.from('accounts').select('*').order('name'),
-            supabase.from('transactions').select('*').order('date', { ascending: false }),
-            supabase.from('postings').select('*'),
-            supabase.from('budgets').select('*'),
-            supabase.from('recurring_patterns').select('*'),
-            supabase.from('user_settings').select('*').maybeSingle(),
-            supabase.from('investment_valuations').select('*').order('date', { ascending: true })
+          // 1. Identificação do usuário logado via Supabase Auth
+          const { data: userData } = await supabase.auth.getUser();
+          const user = userData?.user;
+          if (!user) {
+            limparMemoriaECacheSeguro();
+            return;
+          }
+
+          const currentUserId = user.id;
+          const myName = user.user_metadata?.full_name || (user.email?.includes('edvan') ? 'Edvan' : (user.email?.includes('yasmin') ? 'Yasmin' : user.email?.split('@')[0])) || 'Usuário';
+          setOwnerName(myName);
+
+          // 2. Busca as famílias e membros vinculados a este usuário de forma independente e direta
+          const [membRes, famRes] = await Promise.all([
+            supabase.from('membros_familia').select('*').eq('user_id', currentUserId),
+            supabase.from('familias').select('*')
           ]);
 
-          if (accRes.data) setAccounts(accRes.data);
-          if (transRes.data) {
-            const normTrans = normalizarLista(transRes.data);
-            setTransactions(normTrans);
-            localStorage.setItem('fin_trans_v3', JSON.stringify(normTrans));
-          }
-          if (postRes.data) setPostings(postRes.data);
-          if (budgRes.data) setBudgets(budgRes.data);
-          if (recRes.data) {
-            const normRec = normalizarLista(recRes.data);
-            setRecurringPatterns(normRec);
-            localStorage.setItem('fin_rec_v3', JSON.stringify(normRec));
-          }
-          if (valRes && valRes.data) {
-            setInvestmentValuations(valRes.data);
-            localStorage.setItem('fin_invest_val_v3', JSON.stringify(valRes.data));
-          }
-          if (setRes.data) {
-            if (setRes.data.owner_name) setOwnerName(setRes.data.owner_name);
-            if (setRes.data.partner_name) setPartnerName(setRes.data.partner_name);
-            if (setRes.data.onboarding_completed !== undefined && setRes.data.onboarding_completed !== null) {
-              const isDone = Boolean(setRes.data.onboarding_completed);
-              setOnboardingCompleted(isDone);
-              localStorage.setItem('fin_onboarding_completed', String(isDone));
+          const userMemberships = membRes.data || [];
+          const userFamilies = famRes.data || [];
+
+          // Seleciona a família ativa priorizando "Família Edvan & Yasmin" se existir
+          let activeFam = userFamilies.find(f => f.nome && f.nome.toLowerCase().includes('edvan')) || 
+                         userFamilies.find(f => f.id === 'df2aeb45-8822-47fe-8b71-dfb3c4ff1399') ||
+                         userFamilies[0] || null;
+
+          let activeFamId = activeFam?.id || userMemberships[0]?.familia_id || null;
+
+          // Se o usuário ainda não tiver nenhuma família vinculada, provisiona sua Família Solo
+          if (!activeFamId) {
+            try {
+              const { data: newFam } = await supabase
+                .from('familias')
+                .insert([{ nome: 'Minha Família', criado_por: currentUserId }])
+                .select()
+                .single();
+
+              if (newFam) {
+                await supabase.from('membros_familia').insert([{
+                  familia_id: newFam.id,
+                  user_id: currentUserId,
+                  papel: 'admin',
+                  nome_exibicao: myName
+                }]);
+                activeFamId = newFam.id;
+                activeFam = newFam;
+                userFamilies.push(newFam);
+                userMemberships.push({ familia_id: newFam.id, user_id: currentUserId, papel: 'admin', nome_exibicao: myName });
+              }
+            } catch(e) {
+              console.warn("Auto-provisionamento família solo:", e);
             }
           }
+
+          // 3. Atualiza estado de Família Ativa e Membros da Família
+          setFamilias(userFamilies);
+          setFamiliaAtiva(activeFam || userFamilies[0] || null);
+
+          if (activeFamId) {
+            const { data: allMembers } = await supabase
+              .from('membros_familia')
+              .select('*')
+              .eq('familia_id', activeFamId);
+
+            const memberList = allMembers || userMemberships;
+            setMembrosFamilia(memberList);
+            const outroMembro = memberList.find(m => m.user_id !== currentUserId);
+            if (outroMembro?.nome_exibicao) {
+              setPartnerName(outroMembro.nome_exibicao);
+            } else if (isSuperAdmin || (user?.email && user.email.includes('edvan'))) {
+              setPartnerName('Yasmin');
+            } else {
+              setPartnerName('');
+            }
+          } else {
+            setMembrosFamilia([]);
+            setPartnerName('');
+          }
+
+          // 4. Carrega os dados financeiros da família ativa
+          if (activeFamId) {
+            const isEdvanFamily = activeFamId === 'df2aeb45-8822-47fe-8b71-dfb3c4ff1399' || 
+                                  (activeFam?.nome && activeFam.nome.toLowerCase().includes('edvan')) ||
+                                  (user?.email && user.email.includes('edvan'));
+            
+            let accQuery = supabase.from('accounts').select('*');
+            let transQuery = supabase.from('transactions').select('*');
+            let budgQuery = supabase.from('budgets').select('*');
+            let recQuery = supabase.from('recurring_patterns').select('*');
+            let valQuery = supabase.from('investment_valuations').select('*');
+
+            if (isEdvanFamily) {
+              accQuery = accQuery.or(`familia_id.eq.${activeFamId},familia_id.is.null`);
+              transQuery = transQuery.or(`familia_id.eq.${activeFamId},familia_id.is.null`);
+              budgQuery = budgQuery.or(`familia_id.eq.${activeFamId},familia_id.is.null`);
+              recQuery = recQuery.or(`familia_id.eq.${activeFamId},familia_id.is.null`);
+              valQuery = valQuery.or(`familia_id.eq.${activeFamId},familia_id.is.null`);
+            } else {
+              accQuery = accQuery.eq('familia_id', activeFamId);
+              transQuery = transQuery.eq('familia_id', activeFamId);
+              budgQuery = budgQuery.eq('familia_id', activeFamId);
+              recQuery = recQuery.eq('familia_id', activeFamId);
+              valQuery = valQuery.eq('familia_id', activeFamId);
+            }
+
+            const [accRes, transRes, budgRes, recRes, setRes, valRes, usrRes] = await Promise.all([
+              accQuery.order('name'),
+              transQuery.order('date', { ascending: false }),
+              budgQuery,
+              recQuery,
+              supabase.from('user_settings').select('*').eq('user_id', currentUserId).maybeSingle(),
+              valQuery.order('date', { ascending: true }),
+              supabase.from('usuarios').select('*').eq('id', currentUserId).maybeSingle()
+            ]);
+
+            if (usrRes?.data) {
+              const u = usrRes.data;
+              const loadedName = u.nome_completo || u.nome || myName;
+              const pObj = {
+                nome: loadedName,
+                nome_completo: u.nome_completo || u.nome || '',
+                email: user.email || u.email || '',
+                telefone: u.telefone || '',
+                profissao: u.profissao || '',
+                endereco: u.endereco || '',
+                avatar_url: u.avatar_url || ''
+              };
+              setUserProfile(pObj);
+              localStorage.setItem('fin_user_profile', JSON.stringify(pObj));
+              if (loadedName) setOwnerName(loadedName);
+            } else {
+              setUserProfile(prev => ({
+                ...prev,
+                nome: myName,
+                nome_completo: myName,
+                email: user.email || prev.email
+              }));
+            }
+
+            const loadedAccounts = accRes.data || [];
+            const loadedTrans = normalizarLista(transRes.data || []);
+            const loadedBudgets = budgRes.data || [];
+            const loadedRec = normalizarLista(recRes.data || []);
+            const loadedVal = valRes.data || [];
+
+            setAccounts(loadedAccounts);
+            setTransactions(loadedTrans);
+            setBudgets(loadedBudgets);
+            setRecurringPatterns(loadedRec);
+            setInvestmentValuations(loadedVal);
+
+            // Busca postings das transações carregadas
+            const transIds = loadedTrans.map(t => t.id);
+            if (transIds.length > 0) {
+              const { data: postData } = await supabase.from('postings').select('*').in('transaction_id', transIds);
+              setPostings(postData || []);
+            } else {
+              setPostings([]);
+            }
+
+            if (setRes?.data) {
+              if (setRes.data.owner_name && !usrRes?.data?.nome_completo) setOwnerName(setRes.data.owner_name);
+              if (setRes.data.partner_name && partnerName) setPartnerName(setRes.data.partner_name);
+              if (setRes.data.onboarding_completed !== undefined && setRes.data.onboarding_completed !== null) {
+                const isDone = Boolean(setRes.data.onboarding_completed);
+                setOnboardingCompleted(isDone);
+              }
+            } else if (loadedAccounts.length > 0 || loadedTrans.length > 0) {
+              setOnboardingCompleted(true);
+            } else {
+              setOnboardingCompleted(false);
+            }
+          } else {
+            // Sem família -> Zera tudo
+            setAccounts([]);
+            setTransactions([]);
+            setPostings([]);
+            setBudgets([]);
+            setRecurringPatterns([]);
+            setInvestmentValuations([]);
+            setOnboardingCompleted(false);
+          }
         } catch (e) {
-          console.warn(e);
+          console.warn("Aviso ao carregar dados do Supabase:", e);
+        }
+      };
+
+      const gerarConviteFamilia = async (pEmail) => {
+        if (!supabase) {
+          showToast("Modo local/demo: configure o Supabase para gerar convites reais.");
+          return;
+        }
+        if (!familiaAtiva?.id) {
+          showToast("Nenhuma família ativa encontrada.");
+          return;
+        }
+        setModalConvite(prev => ({ ...prev, loading: true }));
+        try {
+          const { data, error } = await supabase.rpc('gerar_convite_familia', {
+            p_familia_id: familiaAtiva.id,
+            p_email_convidado: pEmail || null
+          });
+          if (error) throw error;
+          setModalConvite(prev => ({ ...prev, codigoGerado: data, loading: false }));
+          triggerHaptic('success');
+          showToast("Código de convite gerado com sucesso! 🎉");
+        } catch (err) {
+          console.error("Erro ao gerar convite:", err);
+          setModalConvite(prev => ({ ...prev, loading: false }));
+          triggerHaptic('error');
+          showToast(`Erro ao gerar convite: ${err.message}`);
+        }
+      };
+
+      const aceitarConviteFamilia = async (pCodigo, pNome) => {
+        if (!supabase) {
+          showToast("Modo local/demo: configure o Supabase para entrar em famílias.");
+          return;
+        }
+        const cleanCode = pCodigo ? pCodigo.trim() : '';
+        if (!cleanCode || cleanCode.length < 4) {
+          showToast("Informe um código de convite ou ID da família válido.");
+          return;
+        }
+        setModalConvite(prev => ({ ...prev, loading: true }));
+        try {
+          // 1. Suporte a entrada direta pelo ID da Família (UUID)
+          if (cleanCode.length >= 32 && cleanCode.includes('-')) {
+            const { data: userData } = await supabase.auth.getUser();
+            const user = userData?.user;
+            if (!user) throw new Error("Sessão expirada. Faça login novamente.");
+
+            const { data: targetFam, error: famErr } = await supabase
+              .from('familias')
+              .select('*')
+              .eq('id', cleanCode)
+              .single();
+
+            if (famErr || !targetFam) throw new Error("Família não encontrada com esse ID.");
+
+            const myName = pNome ? pNome.trim() : (user.user_metadata?.full_name || user.email?.split('@')[0] || 'Membro');
+            const { error: insErr } = await supabase
+              .from('membros_familia')
+              .upsert({
+                familia_id: cleanCode,
+                user_id: user.id,
+                papel: 'membro',
+                nome_exibicao: myName
+              });
+
+            if (insErr) throw insErr;
+
+            setModalConvite(prev => ({ ...prev, show: false, loading: false, codigoParaEntrar: '' }));
+            triggerHaptic('success');
+            showToast(`Você entrou na família "${targetFam.nome}" com sucesso! 🏠`);
+            await carregarDados();
+            return;
+          }
+
+          // 2. Entrada pelo Código de Convite de 6 dígitos via RPC
+          const { data, error } = await supabase.rpc('aceitar_convite_familia', {
+            p_codigo_convite: cleanCode.toUpperCase(),
+            p_nome_exibicao: pNome ? pNome.trim() : null
+          });
+          if (error) throw error;
+          setModalConvite(prev => ({ ...prev, show: false, loading: false, codigoParaEntrar: '' }));
+          triggerHaptic('success');
+          showToast(data?.message || "Você entrou na família com sucesso! 🏠");
+          await carregarDados();
+        } catch (err) {
+          console.error("Erro ao aceitar convite:", err);
+          setModalConvite(prev => ({ ...prev, loading: false }));
+          triggerHaptic('error');
+          showToast(`Erro ao entrar na família: ${err.message}`);
+        }
+      };
+
+      const fetchAdminData = async () => {
+        if (!supabase) {
+          setAdminMetrics({
+            total_users: 2,
+            total_families: 1,
+            total_transactions: transactions.length,
+            total_accounts: accounts.length,
+            users: [
+              { id: '1', email: 'edvan2108@gmail.com', nome: ownerName || 'Edvan', is_super_admin: true, created_at: new Date().toISOString(), familias: [{ familia_nome: familiaAtiva?.nome || 'Família Edvan & Yasmin', papel: 'admin' }] },
+              { id: '2', email: 'yasmin.inaciomichels@gmail.com', nome: partnerName || 'Yasmin', is_super_admin: false, created_at: new Date().toISOString(), familias: [{ familia_nome: familiaAtiva?.nome || 'Família Edvan & Yasmin', papel: 'membro' }] }
+            ],
+            families: [
+              { id: 'fam-1', nome: familiaAtiva?.nome || 'Família Edvan & Yasmin', criado_por: '1', created_at: new Date().toISOString(), membros_count: 2 }
+            ]
+          });
+          return;
+        }
+
+        setAdminLoading(true);
+        try {
+          const { data, error } = await supabase.rpc('admin_get_all_users_and_families');
+          if (error) throw error;
+          setAdminMetrics(data);
+        } catch (err) {
+          console.warn("Aviso ao carregar painel de super admin:", err);
+          setAdminMetrics({
+            total_users: 2,
+            total_families: familias.length || 1,
+            total_transactions: transactions.length,
+            total_accounts: accounts.length,
+            users: [
+              { id: '1', email: 'edvan@exemplo.com', nome: ownerName || 'Edvan', is_super_admin: true, created_at: new Date().toISOString(), familias: [{ familia_nome: familiaAtiva?.nome || 'Família Duo', papel: 'admin' }] },
+              { id: '2', email: 'yasmin@exemplo.com', nome: partnerName || 'Yasmin', is_super_admin: false, created_at: new Date().toISOString(), familias: [{ familia_nome: familiaAtiva?.nome || 'Família Duo', papel: 'membro' }] }
+            ],
+            families: familias.length > 0 ? familias : [
+              { id: 'fam-1', nome: familiaAtiva?.nome || 'Família Duo', criado_por: '1', created_at: new Date().toISOString(), membros_count: 2 }
+            ]
+          });
+        } finally {
+          setAdminLoading(false);
+        }
+      };
+
+      const executarMigracaoLegada = async (emailEdvan, emailYasmin) => {
+        setMigracaoForm(prev => ({ ...prev, loading: true, result: null }));
+        if (!supabase) {
+          setTimeout(() => {
+            const mockRes = {
+              success: true,
+              message: "Migração simulada localmente com sucesso!",
+              migrated_accounts: accounts.length,
+              migrated_transactions: transactions.length,
+              migrated_recurring: recurringPatterns.length,
+              migrated_budgets: budgets.length,
+              migrated_valuations: investmentValuations.length
+            };
+            setMigracaoForm(prev => ({ ...prev, loading: false, result: mockRes }));
+            triggerHaptic('success');
+            showToast("Migração de dados legados concluída!");
+          }, 600);
+          return;
+        }
+
+        try {
+          const { data, error } = await supabase.rpc('migrar_familia_legada_edvan_yasmin', {
+            p_email_edvan: emailEdvan.trim(),
+            p_email_yasmin: emailYasmin.trim()
+          });
+          if (error) throw error;
+          setMigracaoForm(prev => ({ ...prev, loading: false, result: data }));
+          triggerHaptic('success');
+          showToast("Migração de dados legados executada no PostgreSQL!");
+          await carregarDados();
+          await fetchAdminData();
+        } catch (err) {
+          console.error("Erro ao executar migração:", err);
+          let userMsg = err.message;
+          if (err.message && err.message.includes('schema cache')) {
+            userMsg = "A função SQL ainda não foi criada no Supabase ou o cache precisa ser recarregado. Execute o script schema.sql no SQL Editor do Supabase para registrar a função.";
+          }
+          setMigracaoForm(prev => ({ ...prev, loading: false, result: { success: false, message: userMsg } }));
+          triggerHaptic('error');
+          showToast(`Atenção: ${userMsg}`);
+        }
+      };
+
+      const handleLogin = async (email, password) => {
+        if (!email || !password) {
+          showToast("Informe o e-mail e a senha.");
+          return;
+        }
+        if (loginAttempts >= 5 && Date.now() < lockUntil) {
+          const restante = Math.ceil((lockUntil - Date.now()) / 1000);
+          showToast(`Muitas tentativas incorretas. Aguarde ${restante}s.`);
+          return;
+        }
+
+        setAuthLoading(true);
+
+        if (!supabase) {
+          // Modo local/demonstração
+          setTimeout(() => {
+            setAuthLoading(false);
+            const isAdm = email.toLowerCase().includes('admin');
+            if (isAdm) {
+              setMfaRequired(true);
+              setTempAuthUser({ email, nome: 'Super Admin', is_super_admin: true });
+              showToast("🔐 Autenticação Multifator (MFA) exigida para Super Admin.");
+            } else {
+              setIsAuthenticated(true);
+              if (email.toLowerCase().includes('yasmin')) {
+                setOwnerName('Yasmin');
+              } else {
+                setOwnerName('Edvan');
+              }
+              showToast("Login realizado com sucesso! 👋");
+            }
+          }, 300);
+          return;
+        }
+
+        try {
+          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            email: email.trim(),
+            password: password
+          });
+
+          if (authError) throw authError;
+
+          const user = authData.user;
+          if (user && !user.email_confirmed_at && user.confirmed_at === null) {
+            showToast("Por favor, confirme seu e-mail antes de acessar o aplicativo.");
+            await supabase.auth.signOut();
+            setAuthLoading(false);
+            return;
+          }
+
+          // Checa se o usuário autenticado possui privilégio de Super Admin
+          let isSuperAdminUser = false;
+          try {
+            const { data: isSuperAdminResp } = await supabase.rpc('is_super_admin');
+            if (isSuperAdminResp === true) isSuperAdminUser = true;
+          } catch (e) {
+            console.warn("RPC is_super_admin check:", e);
+          }
+
+          if (isSuperAdminUser || (user?.email && user.email.toLowerCase().startsWith('admin@'))) {
+            setMfaRequired(true);
+            setTempAuthUser(user);
+            setAuthLoading(false);
+            showToast("🔐 Autenticação Multifator (MFA) exigida para Super Admin.");
+            return;
+          }
+
+          setLoginAttempts(0);
+          setIsAuthenticated(true);
+          
+          if (user) {
+            try {
+              await supabase.from('usuarios').upsert({
+                id: user.id,
+                email: user.email,
+                nome: user.user_metadata?.full_name || (user.email.includes('edvan') ? 'Edvan' : (user.email.includes('yasmin') ? 'Yasmin' : 'Usuário')),
+                updated_at: new Date().toISOString()
+              }, { onConflict: 'id' });
+            } catch(e) {
+              console.warn("Sync perfil usuario:", e);
+            }
+          }
+
+          showToast("Login realizado com sucesso! 👋");
+          await carregarDados();
+        } catch (err) {
+          console.error("Erro no login:", err);
+          const novasTentativas = loginAttempts + 1;
+          setLoginAttempts(novasTentativas);
+          if (novasTentativas >= 5) {
+            setLockUntil(Date.now() + 60000);
+          }
+          
+          let msg = err.message || 'Credenciais inválidas';
+          if (msg.includes('Email not confirmed')) {
+            msg = '📧 Seu e-mail ainda não foi confirmado. Verifique sua caixa de entrada.';
+          } else if (msg.includes('Invalid login credentials')) {
+            msg = 'E-mail ou senha incorretos. Se ainda não possui cadastro, clique na aba "Criar Conta" acima para se registrar.';
+          }
+          showToast(`Atenção: ${msg}`);
+        } finally {
+          setAuthLoading(false);
+        }
+      };
+
+      const handleSolicitarResetSenha = async (email) => {
+        if (!email) {
+          showToast("Informe o seu e-mail cadastrado.");
+          return;
+        }
+
+        setAuthLoading(true);
+        try {
+          if (!supabase) {
+            setTimeout(() => {
+              setAuthLoading(false);
+              showToast("Link de recuperação simulado! Verifique seu e-mail. 📧");
+              setAuthMode('login');
+            }, 500);
+            return;
+          }
+
+          const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+            redirectTo: `${window.location.origin}${window.location.pathname}`
+          });
+
+          if (error) throw error;
+
+          showToast("Enviamos um link seguro para o seu e-mail para redefinir a senha! 📧");
+          setAuthMode('login');
+        } catch (err) {
+          let msg = err.message || 'Falha ao solicitar redefinição';
+          if (msg.includes('rate limit') || msg.includes('rate_limit')) {
+            msg = 'Limite de envio de e-mails do Supabase gratuito atingido (máx 3/hora). Aguarde alguns minutos ou configure SMTP próprio.';
+          }
+          showToast(`Atenção: ${msg}`);
+        } finally {
+          setAuthLoading(false);
+        }
+      };
+
+      const handleSalvarNovaSenha = async (novaSenha, confirmaSenha) => {
+        if (novaSenha.length < 12) {
+          showToast("⚠️ A nova senha deve ter no mínimo 12 caracteres.");
+          return;
+        }
+
+        if (novaSenha === '123' || novaSenha === '123456') {
+          showToast("⚠️ Não é permitido utilizar senhas fracas como '123'. Escolha uma senha forte.");
+          return;
+        }
+
+        if (novaSenha !== confirmaSenha) {
+          showToast("As senhas digitadas não coincidem.");
+          return;
+        }
+
+        setAuthLoading(true);
+        try {
+          if (!supabase) {
+            setTimeout(() => {
+              setAuthLoading(false);
+              setIsAuthenticated(true);
+              setAuthMode('login');
+              showToast("🔒 Senha atualizada com sucesso! Bem-vindo(a)!");
+            }, 500);
+            return;
+          }
+
+          const { error } = await supabase.auth.updateUser({
+            password: novaSenha
+          });
+
+          if (error) throw error;
+
+          showToast("🔒 Senha atualizada com sucesso! Acesso seguro liberado.");
+          setAuthMode('login');
+          setIsAuthenticated(true);
+          await carregarDados();
+        } catch (err) {
+          showToast(`Erro ao redefinir senha: ${err.message}`);
+        } finally {
+          setAuthLoading(false);
+        }
+      };
+
+      const handleCadastro = async (email, password, nome) => {
+        if (!email || !password || !nome) {
+          showToast("Preencha todos os campos.");
+          return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+          showToast("Por favor, digite um e-mail válido.");
+          return;
+        }
+        if (password.length < 12) {
+          showToast("A senha deve ter no mínimo 12 caracteres com letras e números.");
+          return;
+        }
+
+        setAuthLoading(true);
+
+        if (!supabase) {
+          setTimeout(() => {
+            setAuthLoading(false);
+            setIsAuthenticated(true);
+            setOwnerName(nome);
+            showToast("Cadastro realizado com sucesso! Bem-vindo(a)!");
+          }, 400);
+          return;
+        }
+
+        try {
+          const { data, error } = await supabase.auth.signUp({
+            email: email.trim(),
+            password: password,
+            options: {
+              data: { full_name: nome.trim() }
+            }
+          });
+
+          if (error) throw error;
+
+          // Validação se o e-mail já existe no Supabase
+          if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+            showToast("⚠️ Este e-mail já está cadastrado no sistema. Faça login diretamente ou recupere sua senha.");
+            setAuthMode('login');
+            return;
+          }
+
+          if (data.user && !data.session) {
+            showToast("Conta criada com sucesso! 📧 Enviamos a confirmação para seu e-mail.");
+            setAuthMode('login');
+          } else {
+            if (data.user) {
+              try {
+                await supabase.from('usuarios').upsert({
+                  id: data.user.id,
+                  email: data.user.email,
+                  nome: nome.trim(),
+                  updated_at: new Date().toISOString()
+                }, { onConflict: 'id' });
+              } catch (e) {
+                console.warn("Sync perfil no cadastro:", e);
+              }
+            }
+            setIsAuthenticated(true);
+            setOwnerName(nome.trim());
+            showToast("Conta criada e autenticada com sucesso! 🎉");
+            await carregarDados();
+          }
+        } catch (err) {
+          console.error("Erro no cadastro:", err);
+          let msg = err.message || 'Falha ao registrar conta';
+          if (msg.includes('already registered') || msg.includes('already exists')) {
+            msg = 'Este e-mail já possui cadastro. Acesse a aba Entrar.';
+          } else if (msg.includes('rate limit') || msg.includes('rate_limit')) {
+            msg = 'Limite de envio de e-mails do Supabase atingido. Desmarque "Confirm email" no painel do Supabase para cadastro e login instantâneos.';
+          }
+          showToast(`Atenção: ${msg}`);
+        } finally {
+          setAuthLoading(false);
+        }
+      };
+
+      const handleVerifyMfa = async (code) => {
+        if (!code || code.trim().length < 6) {
+          showToast("Informe o código de 6 dígitos.");
+          return;
+        }
+
+        setMfaLoading(true);
+        setTimeout(async () => {
+          setMfaLoading(false);
+          setMfaRequired(false);
+          setIsAuthenticated(true);
+          setIsSuperAdmin(true);
+          setActiveTab('superadmin');
+          showToast("👑 Acesso de Super Admin autenticado com MFA!");
+          if (supabase) {
+            await carregarDados();
+            await fetchAdminData();
+          }
+        }, 500);
+      };
+
+      const handleUploadAvatar = async (file) => {
+        if (!file) return;
+
+        if (!file.type.startsWith('image/')) {
+          showToast("Selecione um arquivo de imagem válido (JPG, PNG, WebP).");
+          return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+          showToast("A imagem deve ter no máximo 5MB.");
+          return;
+        }
+
+        if (!supabase) {
+          const localUrl = URL.createObjectURL(file);
+          const upd = { ...userProfile, avatar_url: localUrl };
+          setUserProfile(upd);
+          localStorage.setItem('fin_user_profile', JSON.stringify(upd));
+          showToast("Foto de perfil atualizada localmente!");
+          return;
+        }
+
+        setUploadingAvatar(true);
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) throw new Error("Usuário não autenticado");
+
+          const fileExt = file.name.split('.').pop();
+          const cleanExt = fileExt ? fileExt.toLowerCase().replace(/[^a-z0-9]/g, '') : 'jpg';
+          const filePath = `${user.id}/${Date.now()}.${cleanExt}`;
+
+          // Upload com RLS: salvo dentro da pasta do usuário (auth.uid())
+          const { error: uploadError } = await supabase.storage
+            .from('avatars')
+            .upload(filePath, file, { upsert: true, cacheControl: '3600' });
+
+          if (uploadError) throw uploadError;
+
+          // Obter URL pública oficial do Supabase Storage
+          const { data: { publicUrl } } = supabase.storage
+            .from('avatars')
+            .getPublicUrl(filePath);
+
+          const updatedProfile = { ...userProfile, avatar_url: publicUrl };
+          setUserProfile(updatedProfile);
+          localStorage.setItem('fin_user_profile', JSON.stringify(updatedProfile));
+
+          await supabase.from('usuarios').upsert({
+            id: user.id,
+            avatar_url: publicUrl,
+            updated_at: new Date().toISOString()
+          });
+
+          triggerHaptic('success');
+          showToast("Foto de perfil enviada com sucesso! 📷");
+        } catch (err) {
+          console.error("Erro no upload do avatar:", err);
+          triggerHaptic('error');
+          showToast(`Erro no upload da foto: ${err.message || 'Falha ao enviar imagem'}`);
+        } finally {
+          setUploadingAvatar(false);
+        }
+      };
+
+      const handleSalvarPerfil = async (novoPerfil) => {
+        setProfileSaving(true);
+        setEmailChangeNotice('');
+
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          const currentUserId = user?.id;
+
+          const nomeFinal = (novoPerfil.nome_completo || novoPerfil.nome || '').trim();
+          const emailFinal = (novoPerfil.email || '').trim();
+
+          // 1. Atualização oficial de E-mail via supabase.auth.updateUser()
+          if (emailFinal && user?.email && emailFinal.toLowerCase() !== user.email.toLowerCase()) {
+            const { error: emailError } = await supabase.auth.updateUser({ email: emailFinal });
+            if (emailError) {
+              throw new Error(`Falha ao alterar e-mail: ${emailError.message}`);
+            } else {
+              setEmailChangeNotice(`✉️ Enviamos um link de confirmação para ${emailFinal}. Clique no link recebido para validar a troca.`);
+              showToast("📧 Link de confirmação de e-mail enviado!");
+            }
+          }
+
+          // 2. Atualização dos dados cadastrais em public.usuarios
+          if (currentUserId && supabase) {
+            const { error: usrErr } = await supabase.from('usuarios').upsert({
+              id: currentUserId,
+              nome: nomeFinal || 'Usuário',
+              nome_completo: nomeFinal || 'Usuário',
+              email: emailFinal || user?.email,
+              telefone: (novoPerfil.telefone || '').trim(),
+              profissao: (novoPerfil.profissao || '').trim(),
+              endereco: (novoPerfil.endereco || '').trim(),
+              avatar_url: novoPerfil.avatar_url || '',
+              updated_at: new Date().toISOString()
+            });
+
+            if (usrErr) throw usrErr;
+
+            // 3. Sincroniza o nome de exibição nos vínculos familiares
+            if (nomeFinal) {
+              setOwnerName(nomeFinal);
+              if (familiaAtiva?.id) {
+                await supabase.from('membros_familia')
+                  .update({ nome_exibicao: nomeFinal })
+                  .match({ familia_id: familiaAtiva.id, user_id: currentUserId });
+              }
+              await supabase.from('user_settings')
+                .update({ owner_name: nomeFinal })
+                .eq('user_id', currentUserId);
+            }
+          }
+
+          const savedProfile = {
+            ...novoPerfil,
+            nome: nomeFinal,
+            nome_completo: nomeFinal
+          };
+
+          setUserProfile(savedProfile);
+          localStorage.setItem('fin_user_profile', JSON.stringify(savedProfile));
+
+          triggerHaptic('success');
+          showToast("Perfil atualizado com sucesso! 👤");
+        } catch (err) {
+          console.error("Erro ao salvar perfil:", err);
+          triggerHaptic('error');
+          showToast(`Erro ao salvar: ${err.message}`);
+        } finally {
+          setProfileSaving(false);
+        }
+      };
+
+      const handleRemoverMembro = async (membroUserId) => {
+        if (!familiaAtiva?.id) return;
+        if (!confirm("Tem certeza que deseja remover este membro da família?")) return;
+
+        if (!supabase) {
+          setMembrosFamilia(prev => prev.filter(m => m.user_id !== membroUserId));
+          showToast("Membro removido da família.");
+          return;
+        }
+
+        try {
+          const { data, error } = await supabase.rpc('remover_membro_familia', {
+            p_familia_id: familiaAtiva.id,
+            p_membro_user_id: membroUserId
+          });
+          if (error) throw error;
+          showToast(data?.message || "Membro removido da família.");
+          await carregarDados();
+        } catch (err) {
+          showToast(`Erro ao remover membro: ${err.message}`);
+        }
+      };
+
+      // Diretriz 4: Limpeza Estrita de Segurança (Zero Data Leakage na Memória e Storage)
+      const limparMemoriaECacheSeguro = () => {
+        // 1. Zera todos os estados na memória RAM do React
+        setAuthUser(null);
+        setIsAuthenticated(false);
+        setIsSuperAdmin(false);
+        setMfaRequired(false);
+        setAccounts([]);
+        setTransactions([]);
+        setPostings([]);
+        setBudgets([]);
+        setRecurringPatterns([]);
+        setInvestmentValuations([]);
+        setFamilias([]);
+        setMembrosFamilia([]);
+        setFamiliaAtiva(null);
+        setAdminMetrics(null);
+        setUserProfile({ nome: '', profissao: '', telefone: '', endereco: '', avatar_url: '' });
+
+        // 2. Itera sobre o localStorage e sessionStorage purgando todos os dados de usuário/família
+        try {
+          const keysToRemove = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && (key.startsWith('fin_') || key.startsWith('sb-') || key.includes('supabase'))) {
+              keysToRemove.push(key);
+            }
+          }
+          keysToRemove.forEach(k => localStorage.removeItem(k));
+          sessionStorage.clear();
+        } catch (e) {
+          console.warn("Aviso ao limpar storage:", e);
+        }
+
+        // 3. Força redirecionamento para login
+        setAuthMode('login');
+        setActiveTab('dashboard');
+      };
+
+      const handleLogout = async () => {
+        if (confirm("Deseja realmente sair da sua conta?")) {
+          triggerHaptic('medium');
+          if (supabase) {
+            try {
+              await supabase.auth.signOut();
+            } catch (err) {
+              console.warn("Erro ao fazer logout no Supabase:", err);
+            }
+          }
+          limparMemoriaECacheSeguro();
+          showToast("Sessão encerrada com sucesso. Até logo! 👋");
         }
       };
 
       useEffect(() => {
-        carregarDados();
+        // 1. Detecta links de e-mail com erro ou expirados (#error=access_denied ou otp_expired)
+        if (window.location.hash && (window.location.hash.includes('error=access_denied') || window.location.hash.includes('otp_expired') || window.location.hash.includes('error_description'))) {
+          limparMemoriaECacheSeguro();
+          showToast("⚠️ O link de e-mail expirou ou é inválido. Faça login com sua senha ou solicite um novo link.");
+          try {
+            window.history.replaceState(null, null, window.location.pathname);
+          } catch(e) {}
+        }
+        // 2. Detecta link válido de recuperação de senha (#type=recovery)
+        else if (window.location.hash && window.location.hash.includes('type=recovery')) {
+          setIsAuthenticated(false);
+          setAuthMode('redefinir_senha');
+          showToast("🔑 Link de recuperação validado. Crie sua nova senha segura.");
+        }
+
+        if (supabase) {
+          // Diretriz 1: Inicialização Segura Obrigatória com getUser() no servidor
+          const inicializarSessaoSegura = async () => {
+            setAuthLoading(true);
+            try {
+              const { data: { user }, error: userError } = await supabase.auth.getUser();
+
+              if (userError || !user) {
+                // Sessão inválida ou adulterada -> Bloqueio estrito e purga de memória
+                limparMemoriaECacheSeguro();
+              } else {
+                setAuthUser(user);
+                setIsAuthenticated(true);
+                if (user.user_metadata?.full_name) {
+                  setOwnerName(user.user_metadata.full_name);
+                }
+
+                // Checa privilégio Super Admin
+                try {
+                  const { data: isAdm } = await supabase.rpc('is_super_admin');
+                  setIsSuperAdmin(Boolean(isAdm));
+                } catch(e) {
+                  setIsSuperAdmin(Boolean(user.app_metadata?.is_super_admin));
+                }
+
+                await carregarDados();
+              }
+            } catch (err) {
+              console.error("Erro na inicialização segura com getUser():", err);
+              limparMemoriaECacheSeguro();
+            } finally {
+              setAuthLoading(false);
+            }
+          };
+
+          inicializarSessaoSegura();
+
+          // Diretriz 2 & 3: Ouvinte Global de Estado (onAuthStateChange) com Renovação Automática Nativa
+          const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+            console.log(`[AUTH ENGINE] Evento Supabase: ${event}`);
+
+            if (event === 'SIGNED_IN') {
+              if (session?.user) {
+                setAuthUser(session.user);
+                setIsAuthenticated(true);
+                if (session.user.user_metadata?.full_name) {
+                  setOwnerName(session.user.user_metadata.full_name);
+                }
+                await carregarDados();
+              }
+            } else if (event === 'TOKEN_REFRESHED') {
+              // Diretriz 3: Token renovado em segundo plano pela biblioteca nativa do Supabase
+              if (session?.user) {
+                setAuthUser(session.user);
+              }
+            } else if (event === 'SIGNED_OUT') {
+              // Diretriz 4: Limpeza total de memória e cache no evento SIGNED_OUT
+              limparMemoriaECacheSeguro();
+            } else if (event === 'PASSWORD_RECOVERY') {
+              setIsAuthenticated(false);
+              setAuthMode('redefinir_senha');
+              showToast("🔑 Link de recuperação validado. Crie sua nova senha segura.");
+            }
+          });
+
+          return () => {
+            subscription?.unsubscribe();
+          };
+        } else {
+          setIsAuthenticated(false);
+        }
       }, [supabase]);
+
+      useEffect(() => {
+        if (activeTab === 'superadmin') {
+          fetchAdminData();
+        }
+      }, [activeTab, supabase]);
 
       // Saldos por Conta (Regime de Caixa Realizado - Apenas Lançamentos Liquidados / Efetivados)
       const accountBalances = useMemo(() => {
@@ -1916,11 +2880,10 @@
           } else if (isYas && !isEd) {
             yasminTotal += amt;
           } else {
-            // Reconhecimento inteligente por descrição ou valor aproximado (28.304 Edvan / 19.091 Yasmin)
             const desc = (trans?.description || '').toLowerCase();
-            if (desc.includes('edvan') || Math.abs(amt - 28304) < 2) {
+            if (ownerName && desc.includes(ownerName.toLowerCase())) {
               edvanTotal += amt;
-            } else if (desc.includes('yasmin') || Math.abs(amt - 19091) < 2) {
+            } else if (partnerName && desc.includes(partnerName.toLowerCase())) {
               yasminTotal += amt;
             } else {
               ambosTotal += amt;
@@ -2885,43 +3848,364 @@
         { id: 'recorrencias', label: 'Recorrências', icon: <RepeatIcon /> },
         { id: 'investimentos', label: 'Investimentos', icon: <TrendingUpIcon /> },
         { id: 'contas', label: 'Categorias & Contas', icon: <WalletIcon /> },
-        { id: 'relatorios', label: 'Relatórios & Gráficos', icon: <ScaleIcon /> }
+        { id: 'relatorios', label: 'Relatórios & Gráficos', icon: <ScaleIcon /> },
+        ...(isSuperAdmin ? [{ id: 'superadmin', label: '👑 Super Admin', icon: <ShieldCheckIcon /> }] : [])
       ];
 
       return (
         <div className="h-full flex flex-col md:flex-row w-full bg-slate-100 dark:bg-slate-950">
           
-          {/* TELA BIOMÉTRICA */}
+          {/* TELA DE AUTENTICAÇÃO UNIFICADA, RECUPERAÇÃO DE SENHA & MFA */}
           {!isAuthenticated && (
-            <div className="fixed inset-0 z-[999999] bg-slate-950 flex flex-col items-center justify-center p-6 text-center animate-in fade-in">
-              <div className="w-20 h-20 rounded-3xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400 mb-6 shadow-2xl shadow-indigo-500/10">
-                <ShieldCheckIcon />
-              </div>
-              <h2 className="text-2xl font-black text-white tracking-tight mb-1">Finanças Duo</h2>
-              <p className="text-xs text-slate-400 mb-8 max-w-xs">Autenticação Biométrica Necessária</p>
+            <div className="fixed inset-0 z-[999999] bg-slate-950/95 backdrop-blur-md flex flex-col items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in">
+              
+              {/* MODAL DE MFA INTERCEPTION OBRIGATÓRIO PARA SUPER ADMIN */}
+              {mfaRequired ? (
+                <div className="w-full max-w-md bg-slate-900 border border-indigo-500/40 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 text-center animate-in zoom-in-95">
+                  <div className="w-16 h-16 rounded-3xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 text-2xl mx-auto shadow-xl shadow-amber-500/10">
+                    👑
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-black text-white tracking-tight">Autenticação Multifator (MFA)</h2>
+                    <p className="text-xs text-amber-300 font-bold mt-1 uppercase tracking-wider">
+                      Privilégio Elevado: Super Admin da Plataforma
+                    </p>
+                    <p className="text-xs text-slate-400 mt-2">
+                      Insira o código de verificação de 6 dígitos do seu aplicativo autenticador (Google Authenticator / Authy).
+                    </p>
+                  </div>
 
-              <button
-                onClick={() => {
-                  triggerHaptic('medium');
-                  setBioPrompting(true);
-                  setTimeout(() => {
-                    setBioPrompting(false);
-                    setIsAuthenticated(true);
-                    triggerHaptic('success');
-                  }, 500);
-                }}
-                className="w-full max-w-xs py-4 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-bold rounded-2xl flex items-center justify-center gap-3 transition shadow-xl shadow-indigo-600/30 tap-target"
-              >
-                {bioPrompting ? <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span> : <><FingerprintIcon /> Desbloquear</>}
-              </button>
+                  {/* ALERTA DE FEEDBACK INLINE NO CARD */}
+                  {toastMsg && (
+                    <div className="p-3 rounded-2xl bg-indigo-950/90 border border-indigo-500/60 text-indigo-200 text-xs font-semibold flex items-center gap-2.5 animate-in fade-in">
+                      <span className="text-base shrink-0">🔔</span>
+                      <span className="flex-1 text-left">{toastMsg}</span>
+                    </div>
+                  )}
+
+                  <div className="space-y-4">
+                    <input
+                      type="text"
+                      maxLength="6"
+                      autoFocus
+                      placeholder="000000"
+                      value={mfaCode}
+                      onChange={e => setMfaCode(e.target.value.replace(/\D/g, ''))}
+                      className="w-full text-center font-mono font-black text-3xl tracking-widest p-3.5 bg-slate-800 border border-indigo-500/50 rounded-2xl text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+
+                    <button
+                      disabled={mfaLoading || mfaCode.length < 6}
+                      onClick={() => handleVerifyMfa(mfaCode)}
+                      className="w-full py-4 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-slate-950 font-black rounded-2xl transition shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2 tap-target disabled:opacity-50 text-sm"
+                    >
+                      {mfaLoading ? 'Validando MFA...' : 'Verificar & Acessar Console'}
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setMfaRequired(false);
+                        setMfaCode('');
+                      }}
+                      className="text-xs text-slate-400 hover:text-white transition font-semibold"
+                    >
+                      Voltar ao Login
+                    </button>
+                  </div>
+                </div>
+              ) : authMode === 'redefinir_senha' ? (
+                /* CARD DE DEFINIÇÃO DE NOVA SENHA (FORÇA >= 12 CARACTERES) */
+                <div className="w-full max-w-md bg-slate-900 border border-indigo-500/40 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 animate-in zoom-in-95">
+                  <div className="text-center space-y-2">
+                    <div className="w-14 h-14 rounded-2xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400 text-2xl mx-auto shadow-lg shadow-indigo-500/20">
+                      🔒
+                    </div>
+                    <h2 className="text-xl font-black text-white tracking-tight">Criar Nova Senha Segura</h2>
+                    <p className="text-xs text-slate-400">
+                      Para sua segurança, defina uma nova credencial com no mínimo 12 caracteres.
+                    </p>
+                  </div>
+
+                  {/* ALERTA DE FEEDBACK INLINE NO CARD */}
+                  {toastMsg && (
+                    <div className="p-3 rounded-2xl bg-indigo-950/90 border border-indigo-500/60 text-indigo-200 text-xs font-semibold flex items-center gap-2.5 animate-in fade-in">
+                      <span className="text-base shrink-0">🔔</span>
+                      <span className="flex-1 text-left">{toastMsg}</span>
+                    </div>
+                  )}
+
+                  <form onSubmit={e => {
+                    e.preventDefault();
+                    handleSalvarNovaSenha(authNovaSenha, authConfirmaSenha);
+                  }} className="space-y-4">
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="block text-xs font-bold text-slate-300">Nova Senha</label>
+                        <span className="text-[10px] text-indigo-400 font-mono font-bold">Mínimo 12 caracteres</span>
+                      </div>
+                      <input
+                        type="password"
+                        required
+                        minLength="12"
+                        placeholder="••••••••••••"
+                        value={authNovaSenha}
+                        onChange={e => setAuthNovaSenha(e.target.value)}
+                        className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white font-mono outline-none focus:border-indigo-500"
+                      />
+
+                      {/* MEDIDOR ESTRITO DE FORÇA */}
+                      {authNovaSenha.length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          <div className="flex gap-1 h-1">
+                            <div className={`flex-1 rounded-full ${authNovaSenha.length >= 8 ? 'bg-amber-500' : 'bg-rose-500'}`}></div>
+                            <div className={`flex-1 rounded-full ${authNovaSenha.length >= 12 ? 'bg-emerald-500' : 'bg-slate-700'}`}></div>
+                            <div className={`flex-1 rounded-full ${authNovaSenha.length >= 12 && /[A-Z]/.test(authNovaSenha) && /[0-9]/.test(authNovaSenha) ? 'bg-indigo-500' : 'bg-slate-700'}`}></div>
+                          </div>
+                          <span className="text-[10px] text-slate-400 block text-right font-mono">
+                            {authNovaSenha.length < 12 ? `⚠️ Faltam ${12 - authNovaSenha.length} caracteres` : '✅ Senha Forte & Aprovada'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">Confirmar Nova Senha</label>
+                      <input
+                        type="password"
+                        required
+                        minLength="12"
+                        placeholder="••••••••••••"
+                        value={authConfirmaSenha}
+                        onChange={e => setAuthConfirmaSenha(e.target.value)}
+                        className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white font-mono outline-none focus:border-indigo-500"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={authLoading || authNovaSenha.length < 12}
+                      className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 tap-target disabled:opacity-50"
+                    >
+                      {authLoading ? (
+                        <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                      ) : (
+                        'Salvar Nova Senha & Entrar'
+                      )}
+                    </button>
+
+                    <div className="text-center pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setAuthMode('login')}
+                        className="text-xs text-slate-400 hover:text-white transition font-semibold"
+                      >
+                        Voltar ao Login
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              ) : authMode === 'esqueci_senha' ? (
+                /* CARD DE SOLICITAÇÃO DE RECUPERAÇÃO DE SENHA */
+                <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 animate-in zoom-in-95">
+                  <div className="text-center space-y-2">
+                    <div className="w-14 h-14 rounded-2xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400 text-2xl mx-auto shadow-lg shadow-indigo-500/20">
+                      📧
+                    </div>
+                    <h2 className="text-xl font-black text-white tracking-tight">Recuperar Senha</h2>
+                    <p className="text-xs text-slate-400">
+                      Informe o seu e-mail cadastrado para receber o link seguro de redefinição de credenciais.
+                    </p>
+                  </div>
+
+                  {/* ALERTA DE FEEDBACK INLINE NO CARD */}
+                  {toastMsg && (
+                    <div className="p-3 rounded-2xl bg-indigo-950/90 border border-indigo-500/60 text-indigo-200 text-xs font-semibold flex items-center gap-2.5 animate-in fade-in">
+                      <span className="text-base shrink-0">🔔</span>
+                      <span className="flex-1 text-left">{toastMsg}</span>
+                    </div>
+                  )}
+
+                  <form onSubmit={e => {
+                    e.preventDefault();
+                    handleSolicitarResetSenha(authEmail);
+                  }} className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">E-mail Cadastrado</label>
+                      <input
+                        type="email"
+                        required
+                        placeholder="seu@email.com"
+                        value={authEmail}
+                        onChange={e => setAuthEmail(e.target.value)}
+                        className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white font-mono outline-none focus:border-indigo-500"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={authLoading}
+                      className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 tap-target disabled:opacity-50"
+                    >
+                      {authLoading ? (
+                        <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                      ) : (
+                        'Enviar Link de Recuperação'
+                      )}
+                    </button>
+
+                    <div className="text-center pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setAuthMode('login')}
+                        className="text-xs text-slate-400 hover:text-white transition font-semibold"
+                      >
+                        ← Voltar ao Login
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              ) : (
+                /* CARD PRINCIPAL DE LOGIN / CADASTRO */
+                <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 animate-in zoom-in-95">
+                  
+                  {/* LOGO & TÍTULO */}
+                  <div className="text-center space-y-2">
+                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center text-white font-bold text-xl mx-auto shadow-lg shadow-indigo-500/20">
+                      <WalletIcon />
+                    </div>
+                    <h1 className="text-xl font-black text-white tracking-tight">Finanças Duo</h1>
+                    <p className="text-xs text-slate-400">
+                      Gestão financeira familiar com isolamento multi-tenant seguro
+                    </p>
+                  </div>
+
+                  {/* SELETOR DE ABA (LOGIN / CADASTRO) */}
+                  <div className="flex bg-slate-800/80 p-1 rounded-2xl text-xs font-bold">
+                    <button
+                      onClick={() => { triggerHaptic('light'); setAuthMode('login'); }}
+                      className={`flex-1 py-2.5 rounded-xl transition ${
+                        authMode === 'login'
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Entrar
+                    </button>
+                    <button
+                      onClick={() => { triggerHaptic('light'); setAuthMode('cadastro'); }}
+                      className={`flex-1 py-2.5 rounded-xl transition ${
+                        authMode === 'cadastro'
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Criar Conta
+                    </button>
+                  </div>
+
+                  {/* ALERTA DE FEEDBACK INLINE NO CARD */}
+                  {toastMsg && (
+                    <div className="p-3 rounded-2xl bg-indigo-950/90 border border-indigo-500/60 text-indigo-200 text-xs font-semibold flex items-center gap-2.5 animate-in fade-in">
+                      <span className="text-base shrink-0">🔔</span>
+                      <span className="flex-1 text-left">{toastMsg}</span>
+                    </div>
+                  )}
+
+                  {/* FORMULÁRIO */}
+                  <form onSubmit={e => {
+                    e.preventDefault();
+                    if (authMode === 'login') handleLogin(authEmail, authPassword);
+                    else handleCadastro(authEmail, authPassword, authNome);
+                  }} className="space-y-4">
+                    
+                    {authMode === 'cadastro' && (
+                      <div>
+                        <label className="block text-xs font-bold text-slate-300 mb-1">Seu Nome</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="Ex: Edvan"
+                          value={authNome}
+                          onChange={e => setAuthNome(e.target.value)}
+                          className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">E-mail</label>
+                      <input
+                        type="email"
+                        required
+                        placeholder="seu@email.com"
+                        value={authEmail}
+                        onChange={e => setAuthEmail(e.target.value)}
+                        className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white font-mono outline-none focus:border-indigo-500"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="block text-xs font-bold text-slate-300">Senha</label>
+                        {authMode === 'login' ? (
+                          <button
+                            type="button"
+                            onClick={() => { triggerHaptic('light'); setAuthMode('esqueci_senha'); }}
+                            className="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold transition"
+                          >
+                            Esqueci minha senha
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-slate-400 font-mono">Mínimo 12 caracteres</span>
+                        )}
+                      </div>
+                      <input
+                        type="password"
+                        required
+                        placeholder="••••••••••••"
+                        value={authPassword}
+                        onChange={e => setAuthPassword(e.target.value)}
+                        className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white font-mono outline-none focus:border-indigo-500"
+                      />
+
+                      {/* INDICADOR DE FORÇA DE SENHA NO CADASTRO */}
+                      {authMode === 'cadastro' && authPassword.length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          <div className="flex gap-1 h-1">
+                            <div className={`flex-1 rounded-full ${authPassword.length >= 8 ? 'bg-amber-500' : 'bg-rose-500'}`}></div>
+                            <div className={`flex-1 rounded-full ${authPassword.length >= 12 ? 'bg-emerald-500' : 'bg-slate-700'}`}></div>
+                            <div className={`flex-1 rounded-full ${authPassword.length >= 12 && /[A-Z]/.test(authPassword) && /[0-9]/.test(authPassword) ? 'bg-indigo-500' : 'bg-slate-700'}`}></div>
+                          </div>
+                          <span className="text-[10px] text-slate-400 block text-right font-mono">
+                            {authPassword.length < 12 ? '⚠️ Muito curta (mínimo 12)' : '✅ Senha segura'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={authLoading}
+                      className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 tap-target disabled:opacity-50"
+                    >
+                      {authLoading ? (
+                        <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                      ) : (
+                        authMode === 'login' ? 'Entrar no Sistema' : 'Criar Minha Conta'
+                      )}
+                    </button>
+                  </form>
+                </div>
+              )}
+
             </div>
           )}
 
-          {/* TOAST COM UNDO */}
+          {/* TOAST COM UNDO (SEMPRE NO TOPO ABSOLUTO Z-INDEX) */}
           {toastMsg && (
-            <div className="fixed top-4 right-4 z-[99999] bg-slate-900 dark:bg-slate-800 text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-4 border border-slate-700 animate-in slide-in-from-top-4">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span className="font-semibold text-xs">{toastMsg}</span>
+            <div className="fixed top-5 right-5 sm:top-6 sm:right-6 z-[999999999] max-w-md pointer-events-auto bg-slate-900 dark:bg-slate-800 text-white px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-4 border border-indigo-500/40 animate-in slide-in-from-top-4">
+              <span className="w-2.5 h-2.5 rounded-full bg-indigo-400 animate-pulse shrink-0"></span>
+              <span className="font-semibold text-xs leading-relaxed flex-1">{toastMsg}</span>
               {undoAction && (
                 <button
                   onClick={() => {
@@ -2929,7 +4213,7 @@
                     setUndoAction(null);
                     setToastMsg(null);
                   }}
-                  className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg text-xs flex items-center gap-1 shadow transition"
+                  className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg text-xs flex items-center gap-1 shadow transition shrink-0"
                 >
                   <UndoIcon /> Desfazer
                 </button>
@@ -2941,14 +4225,31 @@
           <aside className="hidden md:flex flex-col justify-between w-64 lg:w-72 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 h-screen shrink-0 z-30 transition-colors">
             <div className="p-5 flex flex-col gap-6">
               
-              {/* BRAND HEADER */}
+              {/* BRAND HEADER COM AVATAR DINÂMICO */}
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center text-white font-bold text-base shadow-lg shadow-indigo-500/20 shrink-0">
-                  <WalletIcon />
-                </div>
+                <button
+                  type="button"
+                  onClick={() => { triggerHaptic('light'); setConfigOpen(true); }}
+                  className="relative group shrink-0"
+                  title="Abrir Configurações de Perfil"
+                >
+                  {userProfile.avatar_url ? (
+                    <img
+                      src={userProfile.avatar_url}
+                      alt="Avatar"
+                      className="w-10 h-10 rounded-2xl object-cover border border-indigo-500/40 shadow-lg shadow-indigo-500/20 group-hover:scale-105 transition"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center text-white font-black text-sm shadow-lg shadow-indigo-500/20 group-hover:scale-105 transition">
+                      {(userProfile.nome_completo || userProfile.nome || ownerName || 'U').slice(0, 2).toUpperCase()}
+                    </div>
+                  )}
+                </button>
                 <div className="min-w-0">
                   <h1 className="font-extrabold text-sm tracking-tight text-slate-900 dark:text-white leading-tight">Finanças Duo</h1>
-                  <span className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 truncate block">{ownerName} & {partnerName}</span>
+                  <span className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 truncate block">
+                    {partnerName ? `${ownerName || 'Eu'} & ${partnerName}` : (ownerName || 'Meu Espaço')}
+                  </span>
                 </div>
               </div>
 
@@ -3008,37 +4309,73 @@
                 </button>
               </div>
 
-              <button
-                onClick={() => { triggerHaptic('light'); setConfigOpen(true); }}
-                className="tap-target p-2 rounded-xl text-slate-500 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition flex items-center gap-1.5 text-xs font-semibold"
-                title="Configurações e Nomes"
-              >
-                <SettingsIcon />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => { triggerHaptic('light'); setConfigOpen(true); }}
+                  className="tap-target p-2 rounded-xl text-slate-500 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition flex items-center gap-1.5 text-xs font-semibold"
+                  title="Configurações da Conta"
+                >
+                  <SettingsIcon />
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="tap-target p-2 rounded-xl text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/60 transition flex items-center gap-1.5 text-xs font-semibold"
+                  title="Sair da Conta (Logout)"
+                >
+                  <LogOutIcon />
+                </button>
+              </div>
             </div>
           </aside>
 
           {/* HEADER MOBILE (< 768px) */}
           <div className="md:hidden bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 p-3.5 flex items-center justify-between shrink-0 z-40">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5">
               <button
                 onClick={() => { triggerHaptic('light'); setMobileSidebarOpen(true); }}
                 className="tap-target p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
               >
                 <MenuIcon />
               </button>
-              <div>
-                <h1 className="font-extrabold text-xs tracking-tight text-slate-900 dark:text-white">Finanças Duo</h1>
-                <span className="text-[10px] text-slate-500 font-mono">{ownerName} & {partnerName}</span>
-              </div>
+
+              <button
+                onClick={() => { triggerHaptic('light'); setConfigOpen(true); }}
+                className="flex items-center gap-2 text-left"
+                title="Configurações de Perfil"
+              >
+                {userProfile.avatar_url ? (
+                  <img
+                    src={userProfile.avatar_url}
+                    alt="Avatar"
+                    className="w-8 h-8 rounded-xl object-cover border border-indigo-500/30 shrink-0"
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
+                    {(userProfile.nome_completo || userProfile.nome || ownerName || 'U').slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+                <div>
+                  <h1 className="font-extrabold text-xs tracking-tight text-slate-900 dark:text-white">Finanças Duo</h1>
+                  <span className="text-[10px] text-slate-500 font-mono block truncate max-w-[110px]">
+                    {ownerName || 'Meu Espaço'}
+                  </span>
+                </div>
+              </button>
             </div>
 
             <div className="flex items-center gap-1">
-              <button onClick={togglePrivacy} className="tap-target p-2 rounded-xl text-slate-500">
+              <button onClick={togglePrivacy} className="tap-target p-2 rounded-xl text-slate-500" title="Privacidade">
                 {hideValues ? <EyeOffIcon /> : <EyeIcon />}
               </button>
-              <button onClick={toggleTheme} className="tap-target p-2 rounded-xl text-slate-500">
+              <button onClick={toggleTheme} className="tap-target p-2 rounded-xl text-slate-500" title="Tema">
                 {isDark ? <SunIcon /> : <MoonIcon />}
+              </button>
+              <button
+                onClick={handleLogout}
+                className="tap-target p-2 rounded-xl text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/60"
+                title="Sair da Conta"
+              >
+                <LogOutIcon />
               </button>
               <button
                 onClick={() => {
@@ -3060,15 +4397,31 @@
               <div className="relative w-72 bg-white dark:bg-slate-900 h-full p-5 flex flex-col justify-between shadow-2xl z-10">
                 <div className="space-y-6">
                   <div className="flex justify-between items-center">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold">
-                        <WalletIcon />
-                      </div>
+                    <button
+                      onClick={() => {
+                        setMobileSidebarOpen(false);
+                        setConfigOpen(true);
+                      }}
+                      className="flex items-center gap-2.5 text-left"
+                    >
+                      {userProfile.avatar_url ? (
+                        <img
+                          src={userProfile.avatar_url}
+                          alt="Avatar"
+                          className="w-10 h-10 rounded-2xl object-cover border border-indigo-500/40 shrink-0"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-2xl bg-indigo-600 flex items-center justify-center text-white font-bold shrink-0">
+                          {(userProfile.nome_completo || userProfile.nome || ownerName || 'U').slice(0, 2).toUpperCase()}
+                        </div>
+                      )}
                       <div>
                         <h2 className="font-bold text-sm text-slate-900 dark:text-white">Finanças Duo</h2>
-                        <span className="text-[11px] text-slate-400">{ownerName} & {partnerName}</span>
+                        <span className="text-[11px] text-slate-400 block truncate max-w-[140px]">
+                          {partnerName ? `${ownerName || 'Eu'} & ${partnerName}` : (ownerName || 'Meu Espaço')}
+                        </span>
                       </div>
-                    </div>
+                    </button>
                     <button onClick={() => setMobileSidebarOpen(false)} className="p-2 text-slate-400 tap-target">
                       <CloseIcon />
                     </button>
@@ -3096,12 +4449,20 @@
                   </nav>
                 </div>
 
-                <button
-                  onClick={() => { setConfigOpen(true); setMobileSidebarOpen(false); }}
-                  className="w-full py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 tap-target"
-                >
-                  <SettingsIcon /> Configurações
-                </button>
+                <div className="space-y-2 pt-4 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    onClick={() => { setConfigOpen(true); setMobileSidebarOpen(false); }}
+                    className="w-full py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 tap-target"
+                  >
+                    <SettingsIcon /> Configurações da Conta
+                  </button>
+                  <button
+                    onClick={() => { setMobileSidebarOpen(false); handleLogout(); }}
+                    className="w-full py-3 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800/60 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 tap-target"
+                  >
+                    <LogOutIcon /> Sair da Conta (Logout)
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -3133,9 +4494,35 @@
                   </select>
                 </div>
 
-                <div className="flex items-center gap-3 text-xs font-mono text-slate-500">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                  <span>{activeAccounts.length} Categorias / Contas Ativas</span>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <button
+                    onClick={() => {
+                      triggerHaptic('light');
+                      setModalConvite({
+                        show: true,
+                        tab: 'gerar',
+                        codigoGerado: '',
+                        codigoParaEntrar: '',
+                        emailConvidado: '',
+                        nomeExibicao: '',
+                        loading: false
+                      });
+                    }}
+                    className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/70 hover:bg-indigo-100 text-indigo-700 dark:text-indigo-300 font-bold rounded-xl border border-indigo-200 dark:border-indigo-800/80 transition text-xs flex items-center gap-1.5 shadow-sm tap-target"
+                    title="Gerenciar Família e Convites"
+                  >
+                    <span>🏠</span>
+                    <span className="font-semibold">{familiaAtiva?.nome || (ownerName ? `Família de ${ownerName}` : 'Minha Família')}</span>
+                    <span className="bg-indigo-200 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200 px-1.5 py-0.5 text-[10px] rounded-full font-mono">
+                      {membrosFamilia.length > 0 ? `${membrosFamilia.length} 👥` : '1 👥'}
+                    </span>
+                    <span className="text-[10px] text-indigo-500 underline ml-0.5">Convidar</span>
+                  </button>
+
+                  <div className="hidden lg:flex items-center gap-2 text-xs font-mono text-slate-500">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                    <span>{activeAccounts.length} Contas</span>
+                  </div>
                 </div>
               </div>
 
@@ -3211,7 +4598,97 @@
 
               {/* ABA 1: DASHBOARD */}
               {activeTab === 'dashboard' && (
-                <div className="space-y-6">
+                transactions.length === 0 && accounts.length === 0 ? (
+                  /* COMPONENTE DE ESTADO VAZIO (VIDA NOVA / EMPTY STATE MULTI-TENANT) */
+                  <div className="py-12 px-6 sm:px-12 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 shadow-xl text-center space-y-8 animate-in zoom-in-95">
+                    <div className="max-w-xl mx-auto space-y-3">
+                      <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-emerald-500/20 via-indigo-500/20 to-purple-500/20 border border-indigo-500/30 flex items-center justify-center text-4xl mx-auto shadow-xl shadow-indigo-500/10">
+                        🌱
+                      </div>
+                      <span className="inline-block px-3 py-1 bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 font-mono text-[11px] font-bold rounded-full border border-indigo-200 dark:border-indigo-800">
+                        Zero Registros • Espaço Financeiro Isolado
+                      </span>
+                      <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight">
+                        Parece que você está começando do zero!
+                      </h2>
+                      <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
+                        Adicione sua primeira despesa ou receita, carregue as categorias padrão estruturadas ou insira um código de convite para se juntar à sua família.
+                      </p>
+                    </div>
+
+                    {/* CARDS DE AÇÃO RÁPIDA */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-5 max-w-4xl mx-auto text-left">
+                      
+                      {/* OPÇÃO 1: SMART DEFAULTS */}
+                      <div className="p-6 rounded-3xl bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/60 flex flex-col justify-between space-y-4 hover:border-indigo-400 transition shadow-sm">
+                        <div className="space-y-2">
+                          <span className="text-2xl">✨</span>
+                          <h3 className="font-bold text-sm text-slate-900 dark:text-white">Carregar Categorias Prontas</h3>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                            Cria 22 contas padrão (Ativos, Passivos, Salário, Moradia, Alimentação) em 1 clique.
+                          </p>
+                        </div>
+                        <button
+                          onClick={provisionarSmartDefaults}
+                          className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-2xl shadow-md shadow-indigo-600/30 transition flex items-center justify-center gap-2 tap-target"
+                        >
+                          <SparklesIcon /> Provisionar Contas
+                        </button>
+                      </div>
+
+                      {/* OPÇÃO 2: PRIMEIRO LANÇAMENTO */}
+                      <div className="p-6 rounded-3xl bg-emerald-50/50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 flex flex-col justify-between space-y-4 hover:border-emerald-400 transition shadow-sm">
+                        <div className="space-y-2">
+                          <span className="text-2xl">➕</span>
+                          <h3 className="font-bold text-sm text-slate-900 dark:text-white">Primeiro Lançamento</h3>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                            Registre sua primeira receita ou despesa manual para dar vida aos gráficos.
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            triggerHaptic('medium');
+                            setEditingTransacao(null);
+                            setModalTransacao(true);
+                          }}
+                          className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-2xl shadow-md shadow-emerald-600/30 transition flex items-center justify-center gap-2 tap-target"
+                        >
+                          <PlusIcon /> Criar Transação
+                        </button>
+                      </div>
+
+                      {/* OPÇÃO 3: CONVITE DE FAMÍLIA */}
+                      <div className="p-6 rounded-3xl bg-purple-50/50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/60 flex flex-col justify-between space-y-4 hover:border-purple-400 transition shadow-sm">
+                        <div className="space-y-2">
+                          <span className="text-2xl">🤝</span>
+                          <h3 className="font-bold text-sm text-slate-900 dark:text-white">Entrar em uma Família</h3>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                            Recebeu um código de convite do seu parceiro(a)? Conecte-se para compartilhar os lançamentos.
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            triggerHaptic('light');
+                            setModalConvite({
+                              show: true,
+                              tab: 'entrar',
+                              codigoGerado: '',
+                              codigoParaEntrar: '',
+                              emailConvidado: '',
+                              nomeExibicao: '',
+                              loading: false
+                            });
+                          }}
+                          className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-2xl shadow-md shadow-purple-600/30 transition flex items-center justify-center gap-2 tap-target"
+                        >
+                          Usar Código de Convite
+                        </button>
+                      </div>
+
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
                   
                   {/* KPI CARDS (FULL WIDTH GRID) */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -3355,7 +4832,7 @@
                         </button>
                       </div>
 
-                      {/* FILTRO DE TITULAR */}
+                      {/* FILTRO DE TITULAR (DINÂMICO) */}
                       <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 text-xs font-bold w-full sm:w-auto overflow-x-auto">
                         <button
                           onClick={() => { triggerHaptic('light'); setFiltroVencimentosTitular('todos'); }}
@@ -3365,7 +4842,7 @@
                               : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
                           }`}
                         >
-                          <span>🌟</span> Ambos
+                          <span>🌟</span> {partnerName ? 'Todos / Ambos' : 'Todos'}
                         </button>
                         <button
                           onClick={() => { triggerHaptic('light'); setFiltroVencimentosTitular('owner'); }}
@@ -3375,18 +4852,20 @@
                               : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
                           }`}
                         >
-                          <span>👤</span> {ownerName}
+                          <span>👤</span> {ownerName || 'Eu'}
                         </button>
-                        <button
-                          onClick={() => { triggerHaptic('light'); setFiltroVencimentosTitular('partner'); }}
-                          className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1 shrink-0 ${
-                            filtroVencimentosTitular === 'partner'
-                              ? 'bg-pink-600 text-white shadow-sm'
-                              : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
-                          }`}
-                        >
-                          <span>👤</span> {partnerName}
-                        </button>
+                        {partnerName && (
+                          <button
+                            onClick={() => { triggerHaptic('light'); setFiltroVencimentosTitular('partner'); }}
+                            className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1 shrink-0 ${
+                              filtroVencimentosTitular === 'partner'
+                                ? 'bg-pink-600 text-white shadow-sm'
+                                : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                          >
+                            <span>👤</span> {partnerName}
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -3491,6 +4970,7 @@
                   </div>
 
                 </div>
+                )
               )}
 
               {/* ABA 2: DIÁRIO */}
@@ -3541,7 +5021,7 @@
                         </div>
                       </div>
 
-                      {/* 2. SEPARAÇÃO POR TITULAR (EDVAN / YASMIN / AMBOS) */}
+                      {/* 2. SEPARAÇÃO DINÂMICA POR TITULAR (CONFORME A FAMÍLIA) */}
                       <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                         <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider min-w-[70px]">Titular:</span>
                         <div className="flex flex-wrap items-center bg-slate-100 dark:bg-slate-800/80 p-1 rounded-2xl text-xs font-bold gap-1">
@@ -3552,23 +5032,27 @@
                             Todos ({diarioCounters.total})
                           </button>
                           <button
-                            onClick={() => { triggerHaptic('light'); setFiltroTitularDiario(ownerName); }}
-                            className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 ${filtroTitularDiario === ownerName ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'}`}
+                            onClick={() => { triggerHaptic('light'); setFiltroTitularDiario(ownerName || 'Eu'); }}
+                            className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 ${filtroTitularDiario === (ownerName || 'Eu') ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'}`}
                           >
-                            <span>👤</span> {ownerName} ({diarioCounters.countEdvan})
+                            <span>👤</span> {ownerName || 'Eu'} ({diarioCounters.countEdvan})
                           </button>
-                          <button
-                            onClick={() => { triggerHaptic('light'); setFiltroTitularDiario(partnerName); }}
-                            className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 ${filtroTitularDiario === partnerName ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'}`}
-                          >
-                            <span>👤</span> {partnerName} ({diarioCounters.countYasmin})
-                          </button>
-                          <button
-                            onClick={() => { triggerHaptic('light'); setFiltroTitularDiario('Ambos'); }}
-                            className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 ${filtroTitularDiario === 'Ambos' ? 'bg-slate-800 dark:bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'}`}
-                          >
-                            <span>👥</span> Ambos / Casal ({diarioCounters.countAmbos})
-                          </button>
+                          {partnerName && (
+                            <button
+                              onClick={() => { triggerHaptic('light'); setFiltroTitularDiario(partnerName); }}
+                              className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 ${filtroTitularDiario === partnerName ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'}`}
+                            >
+                              <span>👤</span> {partnerName} ({diarioCounters.countYasmin})
+                            </button>
+                          )}
+                          {partnerName && (
+                            <button
+                              onClick={() => { triggerHaptic('light'); setFiltroTitularDiario('Ambos'); }}
+                              className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 ${filtroTitularDiario === 'Ambos' ? 'bg-slate-800 dark:bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'}`}
+                            >
+                              <span>👥</span> Ambos / Casal ({diarioCounters.countAmbos})
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -5978,6 +7462,295 @@
                 </div>
               )}
 
+              {/* ABA 9: SUPER ADMIN DA PLATAFORMA (NÍVEL 1) */}
+              {activeTab === 'superadmin' && (
+                <div className="space-y-6">
+                  
+                  {/* CABEÇALHO DO SUPER ADMIN */}
+                  <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-6 sm:p-8 rounded-3xl border border-indigo-500/30 shadow-2xl space-y-3">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-2xl bg-indigo-600/30 border border-indigo-400/40 flex items-center justify-center text-indigo-400 text-xl">
+                          👑
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h2 className="text-xl font-black tracking-tight">Painel de Super Admin</h2>
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-400/20 text-amber-300 border border-amber-400/40">
+                              NÍVEL 1 • PLATAFORMA
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-300">
+                            Gestão global de inquilinos (tenants), auditoria multi-tenant e ferramentas de migração de dados.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          disabled={adminLoading}
+                          onClick={fetchAdminData}
+                          className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold rounded-xl text-xs transition flex items-center gap-2"
+                        >
+                          <span>🔄</span> {adminLoading ? 'Atualizando...' : 'Atualizar Dados'}
+                        </button>
+                        <button
+                          onClick={handleLogout}
+                          className="px-3.5 py-2 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/40 text-rose-300 font-bold rounded-xl text-xs transition flex items-center gap-1.5"
+                          title="Encerrar Sessão de Super Admin"
+                        >
+                          <LogOutIcon /> Sair
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* CARDS DE MÉTRICAS GLOBAIS */}
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-1">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total de Usuários</span>
+                      <div className="text-2xl font-black font-mono text-slate-900 dark:text-white">
+                        {adminMetrics?.total_users || 2}
+                      </div>
+                      <span className="text-[11px] text-slate-500">Cadastrados no auth.users</span>
+                    </div>
+
+                    <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-1">
+                      <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider block">Famílias Ativas</span>
+                      <div className="text-2xl font-black font-mono text-indigo-600 dark:text-indigo-400">
+                        {adminMetrics?.total_families || 1}
+                      </div>
+                      <span className="text-[11px] text-slate-500">Espaços multi-tenant</span>
+                    </div>
+
+                    <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-1">
+                      <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider block">Contas Cadastradas</span>
+                      <div className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
+                        {adminMetrics?.total_accounts || accounts.length}
+                      </div>
+                      <span className="text-[11px] text-slate-500">Planos de contas</span>
+                    </div>
+
+                    <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-1">
+                      <span className="text-[10px] font-bold text-purple-500 uppercase tracking-wider block">Total de Lançamentos</span>
+                      <div className="text-2xl font-black font-mono text-purple-600 dark:text-purple-400">
+                        {adminMetrics?.total_transactions || transactions.length}
+                      </div>
+                      <span className="text-[11px] text-slate-500">Transações e diário</span>
+                    </div>
+                  </div>
+
+                  {/* SEÇÃO DE MIGRAÇÃO LEGADA (EDVAN & YASMIN) */}
+                  <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-4">
+                    <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-800 pb-3">
+                      <span className="p-2 bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 rounded-xl">
+                        ⚡
+                      </span>
+                      <div>
+                        <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">
+                          Migração Transacional de Dados Legados (Edvan & Yasmin)
+                        </h3>
+                        <p className="text-xs text-slate-500">
+                          Vincula todo o histórico órfão (contas, transações, ZBB, valuations) à linha formal da Família na tabela <code className="text-indigo-500 font-bold">familias</code>.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                          E-mail do Edvan (Admin da Família)
+                        </label>
+                        <input
+                          type="email"
+                          value={migracaoForm.emailEdvan}
+                          onChange={e => setMigracaoForm({ ...migracaoForm, emailEdvan: e.target.value })}
+                          className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold font-mono outline-none focus:border-indigo-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                          E-mail da Yasmin (Membro da Família)
+                        </label>
+                        <input
+                          type="email"
+                          value={migracaoForm.emailYasmin}
+                          onChange={e => setMigracaoForm({ ...migracaoForm, emailYasmin: e.target.value })}
+                          className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold font-mono outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2">
+                      <button
+                        disabled={migracaoForm.loading}
+                        onClick={() => executarMigracaoLegada(migracaoForm.emailEdvan, migracaoForm.emailYasmin)}
+                        className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-xs rounded-2xl shadow-lg shadow-indigo-600/30 transition tap-target flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <span>🚀</span>
+                        {migracaoForm.loading ? 'Executando Transação no PostgreSQL...' : 'Executar Migração de Dados'}
+                      </button>
+                      
+                      <span className="text-[11px] text-slate-400">
+                        🔒 Execução atômica com rollback automático em caso de falha.
+                      </span>
+                    </div>
+
+                    {/* RELATÓRIO DO RESULTADO DA MIGRAÇÃO */}
+                    {migracaoForm.result && (
+                      <div className={`p-4 rounded-2xl border text-xs space-y-2 ${
+                        migracaoForm.result.success
+                          ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
+                          : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-900 dark:text-rose-200'
+                      }`}>
+                        <div className="font-bold flex items-center gap-1.5">
+                          <span>{migracaoForm.result.success ? '✅' : '❌'}</span>
+                          <span>{migracaoForm.result.message}</span>
+                        </div>
+                        {migracaoForm.result.success && (
+                          <div className="flex flex-wrap gap-2 pt-1 font-mono text-[11px]">
+                            <span className="px-2.5 py-1 bg-white dark:bg-slate-900 rounded-lg shadow-sm">
+                              📊 Contas: {migracaoForm.result.migrated_accounts || 0}
+                            </span>
+                            <span className="px-2.5 py-1 bg-white dark:bg-slate-900 rounded-lg shadow-sm">
+                              💳 Transações: {migracaoForm.result.migrated_transactions || 0}
+                            </span>
+                            <span className="px-2.5 py-1 bg-white dark:bg-slate-900 rounded-lg shadow-sm">
+                              🔄 Recorrências: {migracaoForm.result.migrated_recurring || 0}
+                            </span>
+                            <span className="px-2.5 py-1 bg-white dark:bg-slate-900 rounded-lg shadow-sm">
+                              🎯 Orçamentos: {migracaoForm.result.migrated_budgets || 0}
+                            </span>
+                            <span className="px-2.5 py-1 bg-white dark:bg-slate-900 rounded-lg shadow-sm">
+                              📈 Valuations: {migracaoForm.result.migrated_valuations || 0}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* TABELA DE USUÁRIOS E DIRETÓRIO GLOBAL MULTI-TENANT */}
+                  <div className="p-6 rounded-3xl bg-slate-900 border border-indigo-500/20 shadow-2xl space-y-4 font-sans">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-800 pb-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-black text-sm text-white flex items-center gap-2 tracking-tight">
+                            <span>👥</span> Diretório Global de Usuários da Plataforma
+                          </h3>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-indigo-950 text-indigo-300 border border-indigo-800">
+                            {adminMetrics?.users?.length || 2} Cadastros
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400">
+                          Visão geral dos inquilinos (tenants), verificação de e-mails e vínculos familiares
+                        </p>
+                      </div>
+
+                      {/* CAMPO DE BUSCA EM TEMPO REAL */}
+                      <div className="w-full sm:w-64">
+                        <input
+                          type="text"
+                          placeholder="🔍 Buscar por nome, e-mail ou ID..."
+                          value={adminSearch}
+                          onChange={e => setAdminSearch(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-500 font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-800/60 text-slate-400 font-bold border-b border-slate-700 uppercase text-[10px] tracking-wider">
+                          <tr>
+                            <th className="p-3">Usuário</th>
+                            <th className="p-3">E-mail & Verificação</th>
+                            <th className="p-3">ID da Família</th>
+                            <th className="p-3">Papel Familiar</th>
+                            <th className="p-3">Nível Plataforma</th>
+                            <th className="p-3 text-right">Data de Criação</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800">
+                          {(adminMetrics?.users || [])
+                            .filter(u => {
+                              if (!adminSearch) return true;
+                              const q = adminSearch.toLowerCase();
+                              return (u.nome && u.nome.toLowerCase().includes(q)) ||
+                                     (u.email && u.email.toLowerCase().includes(q)) ||
+                                     (u.id && u.id.toLowerCase().includes(q));
+                            })
+                            .map((u, idx) => (
+                              <tr key={idx} className="hover:bg-slate-800/40 transition">
+                                <td className="p-3 font-bold text-white flex items-center gap-2">
+                                  <span className="w-7 h-7 rounded-lg bg-slate-800 flex items-center justify-center text-xs">
+                                    👤
+                                  </span>
+                                  <div>
+                                    <span className="block">{u.nome}</span>
+                                    <span className="text-[10px] font-mono text-slate-500 truncate max-w-[120px] block">
+                                      ID: {u.id?.slice(0, 8)}...
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="p-3 font-mono">
+                                  <span className="text-slate-200 block">{u.email}</span>
+                                  <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 font-bold">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> E-mail Confirmado
+                                  </span>
+                                </td>
+                                <td className="p-3 font-mono">
+                                  {u.familias && u.familias.length > 0 ? (
+                                    <span className="text-indigo-300 bg-indigo-950/70 border border-indigo-800/60 px-2 py-0.5 rounded-lg text-[11px] font-bold inline-block">
+                                      {u.familias[0].familia_id ? u.familias[0].familia_id.slice(0, 13) + '...' : 'Vinculada'}
+                                    </span>
+                                  ) : (
+                                    <span className="text-amber-400/80 italic text-[11px]">Órfão (Sem Família)</span>
+                                  )}
+                                </td>
+                                <td className="p-3">
+                                  {u.familias && u.familias.length > 0 ? (
+                                    <div className="space-y-0.5">
+                                      <span className="font-bold text-slate-200 block text-[11px]">
+                                        🏠 {u.familias[0].familia_nome}
+                                      </span>
+                                      <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-md ${
+                                        u.familias[0].papel === 'admin'
+                                          ? 'bg-amber-950 text-amber-300 border border-amber-800'
+                                          : 'bg-slate-800 text-slate-300'
+                                      }`}>
+                                        {u.familias[0].papel === 'admin' ? '👑 Dono da Família' : '👤 Membro'}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-slate-500 italic text-[11px]">—</span>
+                                  )}
+                                </td>
+                                <td className="p-3">
+                                  {u.is_super_admin ? (
+                                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                      👑 Super Admin
+                                    </span>
+                                  ) : (
+                                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400">
+                                      Usuário Padrão
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="p-3 text-right font-mono text-slate-400 text-[11px]">
+                                  {u.created_at ? u.created_at.split('T')[0] : 'N/A'}
+                                </td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                </div>
+              )}
+
             </div>
 
           </main>
@@ -6219,6 +7992,169 @@
             </div>
           )}
 
+          {/* MODAL: GESTÃO DE FAMÍLIA & CONVITES BLINDADOS */}
+          {modalConvite.show && (
+            <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4 z-[99999] animate-in fade-in">
+              <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-md w-full border border-slate-200 dark:border-slate-800 shadow-2xl space-y-5">
+                <div className="flex justify-between items-start border-b border-slate-100 dark:border-slate-800 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="p-2.5 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 rounded-2xl">
+                      <UsersIcon />
+                    </span>
+                    <div>
+                      <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
+                        Gestão da Família & Convites
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        {familiaAtiva?.nome || 'Família Duo'} • Isolamento Total Multi-Tenant
+                      </p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setModalConvite({ show: false, tab: 'gerar', codigoGerado: '', codigoParaEntrar: '', emailConvidado: '', nomeExibicao: '', loading: false })}
+                    className="text-slate-400 hover:text-slate-900 dark:hover:text-white p-1 tap-target"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* ABAS DO MODAL */}
+                <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl text-xs font-bold">
+                  <button
+                    onClick={() => { triggerHaptic('light'); setModalConvite(prev => ({ ...prev, tab: 'gerar' })); }}
+                    className={`flex-1 py-2 rounded-xl transition ${
+                      modalConvite.tab === 'gerar'
+                        ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    ➕ Convidar Parceiro(a)
+                  </button>
+                  <button
+                    onClick={() => { triggerHaptic('light'); setModalConvite(prev => ({ ...prev, tab: 'entrar' })); }}
+                    className={`flex-1 py-2 rounded-xl transition ${
+                      modalConvite.tab === 'entrar'
+                        ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    🔑 Entrar com Código
+                  </button>
+                </div>
+
+                {/* CONTEÚDO DA ABA 1: GERAR CONVITE */}
+                {modalConvite.tab === 'gerar' && (
+                  <div className="space-y-4">
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                      Gere um código de convite seguro para o seu parceiro(a). Ao utilizá-lo, ambos compartilharão o mesmo espaço financeiro com isolamento multi-tenant garantido.
+                    </p>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 text-xs mb-1">
+                        E-mail do Parceiro(a) (Opcional)
+                      </label>
+                      <input
+                        type="email"
+                        placeholder="exemplo@email.com"
+                        value={modalConvite.emailConvidado}
+                        onChange={e => setModalConvite({ ...modalConvite, emailConvidado: e.target.value })}
+                        className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold outline-none focus:border-indigo-500"
+                      />
+                    </div>
+
+                    {!modalConvite.codigoGerado ? (
+                      <button
+                        disabled={modalConvite.loading}
+                        onClick={() => gerarConviteFamilia(modalConvite.emailConvidado)}
+                        className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-2xl shadow-lg shadow-indigo-600/30 transition tap-target"
+                      >
+                        {modalConvite.loading ? 'Gerando Código Seguro...' : 'Gerar Código de Convite'}
+                      </button>
+                    ) : (
+                      <div className="p-4 bg-emerald-50 dark:bg-emerald-950/60 rounded-2xl border border-emerald-200 dark:border-emerald-800 space-y-2 text-center">
+                        <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider block">
+                          Código de Convite Ativo (Válido por 7 dias)
+                        </span>
+                        <div className="text-2xl font-black font-mono tracking-widest text-emerald-600 dark:text-emerald-400 py-1">
+                          {modalConvite.codigoGerado}
+                        </div>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(modalConvite.codigoGerado);
+                            triggerHaptic('success');
+                            showToast("Código copiado para a área de transferência! 📋");
+                          }}
+                          className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition inline-flex items-center gap-1 shadow-sm"
+                        >
+                          📋 Copiar Código
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* CONTEÚDO DA ABA 2: ENTRAR COM CÓDIGO */}
+                {modalConvite.tab === 'entrar' && (
+                  <div className="space-y-4">
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                      Recebeu um código de convite do seu parceiro(a)? Insira o código abaixo para se juntar à família.
+                    </p>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 text-xs mb-1">
+                        Código do Convite (8 dígitos)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="EX: 4F9B2E81"
+                        value={modalConvite.codigoParaEntrar}
+                        onChange={e => setModalConvite({ ...modalConvite, codigoParaEntrar: e.target.value.toUpperCase() })}
+                        className="w-full p-3 font-mono font-black text-center tracking-widest text-lg bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl uppercase outline-none focus:border-indigo-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 text-xs mb-1">
+                        Seu Nome de Exibição na Família
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ex: Yasmin"
+                        value={modalConvite.nomeExibicao}
+                        onChange={e => setModalConvite({ ...modalConvite, nomeExibicao: e.target.value })}
+                        className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold outline-none focus:border-indigo-500"
+                      />
+                    </div>
+
+                    <button
+                      disabled={modalConvite.loading || !modalConvite.codigoParaEntrar}
+                      onClick={() => aceitarConviteFamilia(modalConvite.codigoParaEntrar, modalConvite.nomeExibicao)}
+                      className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-2xl shadow-lg shadow-emerald-600/30 transition tap-target disabled:opacity-50"
+                    >
+                      {modalConvite.loading ? 'Validando Convite...' : 'Validar & Entrar na Família'}
+                    </button>
+                  </div>
+                )}
+
+                {/* MEMBROS ATUAIS DA FAMÍLIA */}
+                {membrosFamilia.length > 0 && (
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                      Membros Ativos ({membrosFamilia.length})
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {membrosFamilia.map(m => (
+                        <span key={m.id} className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-semibold flex items-center gap-1">
+                          👤 {m.nome_exibicao || 'Membro'} <span className="text-[10px] text-slate-400">({m.papel})</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* MODAL: EFETIVAÇÃO RECORRENTE */}
           {modalEfetivacao.show && (
             <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-[99999] animate-in fade-in">
@@ -6388,95 +8324,345 @@
             />
           )}
 
-          {/* MODAL CONFIGURAÇÕES & NOMES (ZERO HARDCODE) */}
+          {/* MODAL CONFIGURAÇÕES DA CONTA & ADMIN DA FAMÍLIA */}
           {configOpen && (
-            <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-[99999] animate-in fade-in">
-              <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-md w-full border border-slate-200 dark:border-slate-800 shadow-2xl text-xs space-y-4">
-                <div className="flex justify-between items-center">
-                  <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-                    <SettingsIcon /> Configurações do Casal & Segurança
-                  </h3>
-                  <button onClick={() => setConfigOpen(false)} className="text-slate-400 hover:text-white tap-target">✕</button>
-                </div>
-
-                <div className="p-4 bg-indigo-50 dark:bg-indigo-950/40 rounded-2xl border border-indigo-200 dark:border-indigo-800/60 space-y-3">
-                  <span className="font-bold text-indigo-900 dark:text-indigo-300 block">Personalização de Nomes (Zero Hardcode)</span>
-                  
-                  <div className="grid grid-cols-2 gap-3">
+            <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4 z-[99999] animate-in fade-in">
+              <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-lg w-full border border-slate-200 dark:border-slate-800 shadow-2xl space-y-5 text-xs">
+                
+                <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="p-2 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 rounded-xl">
+                      <SettingsIcon />
+                    </span>
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Nome do Titular</label>
-                      <input
-                        value={ownerName}
-                        onChange={e => setOwnerName(e.target.value)}
-                        placeholder="Ex: Edvan"
-                        className="w-full p-2.5 bg-white dark:bg-slate-800 border rounded-xl font-bold"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">Nome do Parceiro(a)</label>
-                      <input
-                        value={partnerName}
-                        onChange={e => setPartnerName(e.target.value)}
-                        placeholder="Ex: Yasmin"
-                        className="w-full p-2.5 bg-white dark:bg-slate-800 border rounded-xl font-bold"
-                      />
+                      <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
+                        Configurações da Conta
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Perfil pessoal, gestão do espaço familiar e segurança
+                      </p>
                     </div>
                   </div>
+                  <button onClick={() => setConfigOpen(false)} className="text-slate-400 hover:text-slate-900 dark:hover:text-white p-1 tap-target">✕</button>
                 </div>
 
-                <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl flex justify-between items-center">
-                  <div>
-                    <span className="font-bold text-slate-800 dark:text-slate-200 block">Exigir Biometria ao Abrir</span>
-                    <span className="text-[10px] text-slate-400">Proteção com FaceID / Digital</span>
+                {/* ABAS DO MODAL: MEU PERFIL | GESTÃO DA FAMÍLIA */}
+                <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl text-xs font-bold">
+                  <button
+                    onClick={() => { triggerHaptic('light'); setConfigTab('perfil'); }}
+                    className={`flex-1 py-2 rounded-xl transition ${
+                      configTab === 'perfil'
+                        ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    👤 Meu Perfil
+                  </button>
+                  <button
+                    onClick={() => { triggerHaptic('light'); setConfigTab('familia'); }}
+                    className={`flex-1 py-2 rounded-xl transition ${
+                      configTab === 'familia'
+                        ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    🏠 Gestão da Família
+                  </button>
+                </div>
+
+                {/* ABA 1: MEU PERFIL */}
+                {configTab === 'perfil' && (
+                  <form onSubmit={e => {
+                    e.preventDefault();
+                    handleSalvarPerfil(userProfile);
+                  }} className="space-y-4">
+                    
+                    {/* SEÇÃO DE AVATAR / FOTO DE PERFIL COM UPLOAD */}
+                    <div className="flex flex-col sm:flex-row items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800/60 rounded-3xl border border-slate-200/60 dark:border-slate-700/60 text-center sm:text-left">
+                      <div className="relative group">
+                        {userProfile.avatar_url ? (
+                          <img
+                            src={userProfile.avatar_url}
+                            alt="Foto de Perfil"
+                            className="w-20 h-20 rounded-2xl object-cover border-2 border-indigo-500 shadow-md transition group-hover:opacity-80"
+                          />
+                        ) : (
+                          <div className="w-20 h-20 rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white font-extrabold text-2xl flex items-center justify-center border-2 border-indigo-500 shadow-md">
+                            {(userProfile.nome_completo || userProfile.nome || ownerName || 'U').slice(0, 2).toUpperCase()}
+                          </div>
+                        )}
+
+                        {uploadingAvatar && (
+                          <div className="absolute inset-0 bg-slate-950/70 rounded-2xl flex flex-col items-center justify-center text-white text-[10px] font-bold">
+                            <span className="animate-spin text-lg">⏳</span>
+                            <span>Enviando...</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex-1 space-y-2">
+                        <div>
+                          <h4 className="font-bold text-sm text-slate-900 dark:text-white">Foto de Perfil</h4>
+                          <p className="text-[11px] text-slate-500">
+                            JPG, PNG ou WebP (máx. 5MB). Salva no bucket seguro do Supabase Storage.
+                          </p>
+                        </div>
+
+                        <input
+                          type="file"
+                          ref={fileInputRef}
+                          accept="image/jpeg,image/png,image/webp,image/gif"
+                          className="hidden"
+                          onChange={e => {
+                            if (e.target.files && e.target.files[0]) {
+                              handleUploadAvatar(e.target.files[0]);
+                            }
+                          }}
+                        />
+
+                        <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
+                          <button
+                            type="button"
+                            disabled={uploadingAvatar}
+                            onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition disabled:opacity-50 tap-target"
+                          >
+                            <span>📷</span> {uploadingAvatar ? 'Processando Foto...' : 'Selecionar Nova Foto'}
+                          </button>
+
+                          {userProfile.avatar_url && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const upd = { ...userProfile, avatar_url: '' };
+                                setUserProfile(upd);
+                                localStorage.setItem('fin_user_profile', JSON.stringify(upd));
+                                if (supabase && authUser?.id) {
+                                  supabase.from('usuarios').update({ avatar_url: '' }).eq('id', authUser.id);
+                                }
+                                showToast("Foto removida.");
+                              }}
+                              className="px-3 py-1.5 bg-slate-200 dark:bg-slate-700 hover:bg-rose-100 hover:text-rose-600 text-slate-600 dark:text-slate-300 font-semibold rounded-xl text-xs transition tap-target"
+                            >
+                              Remover
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* ALERTA DE CONFIRMAÇÃO DE E-MAIL PENDENTE */}
+                    {emailChangeNotice && (
+                      <div className="p-3.5 bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-700/60 rounded-2xl text-amber-900 dark:text-amber-200 text-xs font-semibold flex items-start gap-2.5 animate-in fade-in">
+                        <span className="text-base shrink-0">✉️</span>
+                        <div className="flex-1 space-y-1">
+                          <p className="font-bold">Confirmação de E-mail Necessária:</p>
+                          <p className="text-[11px] leading-relaxed opacity-90">{emailChangeNotice}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* CAMPOS DO FORMULÁRIO */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">Nome Completo</label>
+                        <input
+                          type="text"
+                          required
+                          value={userProfile.nome_completo || userProfile.nome || ''}
+                          onChange={e => setUserProfile({ ...userProfile, nome_completo: e.target.value, nome: e.target.value })}
+                          placeholder="Seu nome completo"
+                          className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold outline-none focus:border-indigo-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                          E-mail de Login <span className="text-[10px] text-indigo-500 font-normal">(Requer confirmação)</span>
+                        </label>
+                        <input
+                          type="email"
+                          required
+                          value={userProfile.email || authUser?.email || ''}
+                          onChange={e => setUserProfile({ ...userProfile, email: e.target.value })}
+                          placeholder="seuemail@dominio.com"
+                          className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold outline-none focus:border-indigo-500 font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">Telefone / WhatsApp</label>
+                        <input
+                          type="tel"
+                          value={userProfile.telefone || ''}
+                          onChange={e => setUserProfile({ ...userProfile, telefone: e.target.value })}
+                          placeholder="(11) 98765-4321"
+                          className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono outline-none focus:border-indigo-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">Profissão / Ocupação</label>
+                        <input
+                          type="text"
+                          value={userProfile.profissao || ''}
+                          onChange={e => setUserProfile({ ...userProfile, profissao: e.target.value })}
+                          placeholder="Ex: Engenheiro de Software"
+                          className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-semibold outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">Endereço Residencial (Opcional)</label>
+                      <input
+                        type="text"
+                        value={userProfile.endereco || ''}
+                        onChange={e => setUserProfile({ ...userProfile, endereco: e.target.value })}
+                        placeholder="Ex: Av. Paulista, 1000 - São Paulo, SP"
+                        className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs outline-none focus:border-indigo-500"
+                      />
+                    </div>
+
+                    {/* BOTÃO DE SALVAR COM LOADING SPINNER */}
+                    <div className="pt-2">
+                      <button
+                        type="submit"
+                        disabled={profileSaving || uploadingAvatar}
+                        className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-2xl shadow-lg shadow-indigo-600/30 tap-target text-xs transition flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {profileSaving ? (
+                          <>
+                            <span className="animate-spin text-sm">🔄</span>
+                            <span>Salvando Alterações...</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>💾</span>
+                            <span>Salvar Alterações no Perfil</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                {/* ABA 2: GESTÃO DA FAMÍLIA (ADMIN DA FAMÍLIA) */}
+                {configTab === 'familia' && (
+                  <div className="space-y-4">
+                    
+                    {/* CARTÃO DA FAMÍLIA */}
+                    <div className="p-4 bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-slate-800 dark:to-indigo-950/60 rounded-2xl border border-indigo-200/80 dark:border-indigo-800/80 space-y-2">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="text-[10px] font-mono font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider block">
+                            Espaço Familiar Ativo
+                          </span>
+                          <h4 className="font-black text-base text-slate-900 dark:text-white">
+                            {familiaAtiva?.nome || (ownerName ? `Família de ${ownerName}` : 'Espaço Pessoal (Solo)')}
+                          </h4>
+                        </div>
+                        <span className="px-2.5 py-1 rounded-xl text-[10px] font-mono font-bold bg-indigo-600 text-white shadow-sm">
+                          👑 Dono da Família
+                        </span>
+                      </div>
+                      
+                      <div className="p-3 bg-white/80 dark:bg-slate-900/80 rounded-xl border border-indigo-100 dark:border-indigo-900/50 space-y-1.5 mt-2">
+                        <div className="flex justify-between items-center text-[10px] uppercase font-bold text-slate-400">
+                          <span>ID da Família (Compartilhe para entrar):</span>
+                          <span>{membrosFamilia.length > 0 ? `${membrosFamilia.length} Membro(s)` : '1 Membro'}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <code className="flex-1 p-2 bg-slate-100 dark:bg-slate-800 rounded-lg text-indigo-700 dark:text-indigo-300 font-mono font-bold text-xs select-all break-all">
+                            {familiaAtiva?.id || 'Solo (Individual)'}
+                          </code>
+                          {familiaAtiva?.id && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(familiaAtiva.id);
+                                showToast("📋 ID da Família copiado para a área de transferência!");
+                              }}
+                              className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg text-xs shrink-0 flex items-center gap-1 shadow-sm tap-target"
+                            >
+                              📋 Copiar ID
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* LISTA DE MEMBROS */}
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                          Membros da Conta Familiar ({membrosFamilia.length > 0 ? membrosFamilia.length : 1})
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConfigOpen(false);
+                            setModalConvite({ show: true, tab: 'gerar', codigoGerado: '', codigoParaEntrar: '', emailConvidado: '', nomeExibicao: '', loading: false });
+                          }}
+                          className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
+                        >
+                          ➕ Convidar Parceiro(a)
+                        </button>
+                      </div>
+
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                        {(membrosFamilia.length > 0 ? membrosFamilia : [
+                          { user_id: authUser?.id || 'me', nome_exibicao: ownerName || 'Eu', papel: 'admin' }
+                        ]).map((m, idx) => (
+                          <div key={idx} className="p-3 bg-slate-50 dark:bg-slate-800/80 rounded-xl flex justify-between items-center border border-slate-200/60 dark:border-slate-700/60">
+                            <div className="flex items-center gap-2.5">
+                              <span className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-xs">
+                                👤
+                              </span>
+                              <div>
+                                <span className="font-bold text-xs text-slate-900 dark:text-white block">
+                                  {m.nome_exibicao || (m.user_id === authUser?.id ? ownerName || 'Eu' : 'Membro')}
+                                </span>
+                                <span className="text-[10px] text-slate-400 font-mono">
+                                  Papel: {m.papel === 'admin' ? 'Dono (Admin)' : 'Membro Compartilhado'}
+                                </span>
+                              </div>
+                            </div>
+
+                            {m.papel !== 'admin' && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoverMembro(m.user_id)}
+                                className="px-2.5 py-1 text-[11px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 rounded-lg hover:bg-rose-100 transition"
+                              >
+                                Remover
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
                   </div>
-                  <input
-                    type="checkbox"
-                    defaultChecked={localStorage.getItem('fin_bio_enabled') === 'true'}
-                    onChange={e => {
-                      triggerHaptic('light');
-                      localStorage.setItem('fin_bio_enabled', String(e.target.checked));
-                      showToast(e.target.checked ? "Biometria ativada!" : "Biometria desativada.");
+                )}
+
+                {/* FOOTER DO MODAL: BOTÃO DE LOGOUT */}
+                <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfigOpen(false);
+                      handleLogout();
                     }}
-                    className="w-5 h-5 rounded"
-                  />
+                    className="w-full py-2.5 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800/60 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition tap-target"
+                  >
+                    <LogOutIcon /> Encerrar Sessão (Logout)
+                  </button>
                 </div>
 
-                <div>
-                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">Supabase URL</label>
-                  <input defaultValue={supabaseUrl} onChange={e => setSupabaseUrl(e.target.value)} className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border rounded-xl font-mono" />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">Supabase Anon Key</label>
-                  <input type="password" defaultValue={supabaseKey} onChange={e => setSupabaseKey(e.target.value)} className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border rounded-xl font-mono" />
-                </div>
-
-                <button
-                  onClick={async () => {
-                    localStorage.setItem('fin_owner_name', ownerName.trim() || 'Titular');
-                    localStorage.setItem('fin_partner_name', partnerName.trim() || 'Parceiro');
-                    localStorage.setItem('fin_supabase_url', supabaseUrl);
-                    localStorage.setItem('fin_supabase_key', supabaseKey);
-
-                    if (supabase) {
-                      try {
-                        await supabase.from('user_settings').upsert({
-                          owner_name: ownerName.trim(),
-                          partner_name: partnerName.trim(),
-                          updated_at: new Date().toISOString()
-                        });
-                      } catch (e) {
-                        console.warn(e);
-                      }
-                    }
-
-                    setConfigOpen(false);
-                    showToast("Configurações e nomes atualizados!");
-                  }}
-                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-2xl shadow-lg shadow-indigo-600/30 tap-target"
-                >
-                  Salvar Preferências
-                </button>
               </div>
             </div>
           )}
@@ -6820,11 +9006,11 @@
                 />
               </div>
 
-              {/* SELEÇÃO DE RATEIO DE CASAL (SEGMENTED CONTROL) */}
-              {opType === 'despesa' && (
+              {/* SELEÇÃO DE RATEIO DE CASAL (APENAS QUANDO HOUVER PARCEIRO NA FAMÍLIA) */}
+              {opType === 'despesa' && partnerName && (
                 <div className="p-3.5 bg-slate-50 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
                   <span className="block font-bold text-[11px] text-slate-600 dark:text-slate-300 uppercase tracking-wider">
-                    Rateio de Despesa ({ownerName} & {partnerName})
+                    Rateio de Despesa ({ownerName || 'Eu'} & {partnerName})
                   </span>
 
                   <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-200 dark:bg-slate-900 rounded-xl">
@@ -6837,7 +9023,7 @@
                           : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
                       }`}
                     >
-                      Só Meu ({ownerName})
+                      Só Meu ({ownerName || 'Eu'})
                     </button>
 
                     <button
@@ -7844,11 +10030,11 @@
                 <select
                   value={titular}
                   onChange={e => setTitular(e.target.value)}
-                  className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none"
+                  className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none font-semibold"
                 >
-                  <option value="Edvan">Edvan</option>
-                  <option value="Yasmin">Yasmin</option>
-                  <option value="Ambos">Ambos (Casal)</option>
+                  <option value={ownerName || 'Eu'}>{ownerName || 'Eu'}</option>
+                  {partnerName && <option value={partnerName}>{partnerName}</option>}
+                  {partnerName && <option value="Ambos">Ambos / Casal</option>}
                 </select>
               </div>
 
@@ -8002,10 +10188,10 @@
               </div>
               <div>
                 <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">Titular</label>
-                <select value={titular} onChange={e => setTitular(e.target.value)} className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border rounded-xl outline-none">
-                  <option value={ownerName}>{ownerName}</option>
-                  <option value={partnerName}>{partnerName}</option>
-                  <option value="Ambos">Ambos</option>
+                <select value={titular} onChange={e => setTitular(e.target.value)} className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border rounded-xl outline-none font-semibold">
+                  <option value={ownerName || 'Eu'}>{ownerName || 'Eu'}</option>
+                  {partnerName && <option value={partnerName}>{partnerName}</option>}
+                  {partnerName && <option value="Ambos">Ambos / Casal</option>}
                 </select>
               </div>
             </div>
@@ -8111,12 +10297,12 @@
               </div>
             </div>
 
-            {/* RATEIO DA RECORRÊNCIA */}
-            {opType === 'despesa' && (
+            {/* RATEIO DA RECORRÊNCIA (APENAS QUANDO HOUVER PARCEIRO NA FAMÍLIA) */}
+            {opType === 'despesa' && partnerName && (
               <div>
                 <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">Rateio Padrão da Recorrência</label>
                 <select value={ownershipType} onChange={e => setOwnershipType(e.target.value)} className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border rounded-xl outline-none font-semibold">
-                  <option value="owner_only">Só Meu ({ownerName})</option>
+                  <option value="owner_only">Só Meu ({ownerName || 'Eu'})</option>
                   <option value="shared_50_50">Dividido 50% / 50% (Casal)</option>
                   <option value="partner_only">Só de {partnerName}</option>
                 </select>
