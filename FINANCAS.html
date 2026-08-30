@@ -331,8 +331,18 @@
       const [filtroStatusDiario, setFiltroStatusDiario] = useState('todos');
       const [filtroPeriodoDiario, setFiltroPeriodoDiario] = useState('mes');
 
-      const [supabaseUrl, setSupabaseUrl] = useState(localStorage.getItem('fin_supabase_url') || 'https://bcogbqbasyezzuwanhmp.supabase.co');
-      const [supabaseKey, setSupabaseKey] = useState(localStorage.getItem('fin_supabase_key') || 'sb_publishable_-KY6IgO7_OVAV9EG9KUsOQ_CuX8mKmd');
+      const [supabaseUrl, setSupabaseUrl] = useState(() => 
+        localStorage.getItem('fin_supabase_url') || 
+        (typeof window !== 'undefined' && (window.__ENV__?.NEXT_PUBLIC_SUPABASE_URL || window.__ENV__?.VITE_SUPABASE_URL || window.__ENV__?.SUPABASE_URL)) || 
+        (typeof process !== 'undefined' && process.env && (process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL)) ||
+        'https://bcogbqbasyezzuwanhmp.supabase.co'
+      );
+      const [supabaseKey, setSupabaseKey] = useState(() => 
+        localStorage.getItem('fin_supabase_key') || 
+        (typeof window !== 'undefined' && (window.__ENV__?.NEXT_PUBLIC_SUPABASE_ANON_KEY || window.__ENV__?.VITE_SUPABASE_ANON_KEY || window.__ENV__?.SUPABASE_ANON_KEY)) || 
+        (typeof process !== 'undefined' && process.env && (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY)) ||
+        'sb_publishable_-KY6IgO7_OVAV9EG9KUsOQ_CuX8mKmd'
+      );
       
       const [accounts, setAccounts] = useState(() => {
         const saved = localStorage.getItem('fin_acc_v3');
