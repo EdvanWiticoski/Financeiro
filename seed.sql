@@ -1,10 +1,16 @@
 -- ============================================================================
 -- FINANÇAS DUO - SEED MULTI-TENANT E SMART DEFAULTS (seed.sql)
 -- ============================================================================
+-- NOTA DE ARQUITETURA & SEGURANÇA:
+-- A definição do campo 'is_super_admin' na tabela public.usuarios NÃO deve ser feita
+-- por scripts de seed para evitar conflitos de ordem de execução ou sobrescrita acidental.
+-- O privilégio de Super Admin deve ser gerenciado exclusivamente pelo painel do
+-- Supabase (Database / Auth) ou via RPC administrativa segura no servidor.
+-- ============================================================================
 
 DO $$
 DECLARE
-    v_user_id UUID := COALESCE(auth.uid(), '00000000-0000-0000-0000-000000000000'::uuid);
+    v_user_id UUID := auth.uid();
     v_fam_id UUID;
     v_acc_checking UUID;
     v_acc_invest UUID;
@@ -15,6 +21,11 @@ DECLARE
     v_acc_internet UUID;
     v_current_year INT := EXTRACT(YEAR FROM CURRENT_DATE)::INT;
 BEGIN
+    -- Validação Estrita de Sessão Autenticada
+    IF auth.uid() IS NULL THEN
+        RAISE EXCEPTION 'auth.uid() é nulo — rode este script em uma sessão autenticada real.';
+    END IF;
+
     -- 1. Obter ou Criar Família Principal do Usuário
     SELECT id INTO v_fam_id FROM public.familias WHERE criado_por = v_user_id LIMIT 1;
     
@@ -175,53 +186,4 @@ BEGIN
         ON CONFLICT DO NOTHING;
     END IF;
 
-END $$;
--- ============================================================================
--- FINANÇAS DUO: PROVISIONAMENTO FORÇADO DE USUÁRIOS NO SQL (SENHA 123)
--- ============================================================================
-
-DO $$
-DECLARE
-    v_id_edvan UUID;
-    v_id_yasmin UUID;
-    v_id_admin UUID;
-    v_encrypted_pw TEXT := extensions.crypt('123', extensions.gen_salt('bf'));
-BEGIN
-    -- 1. Cria ou Atualiza Edvan (edvan2108@gmail.com) no auth.users
-    SELECT id INTO v_id_edvan FROM auth.users WHERE email = 'edvan2108@gmail.com';
-    IF v_id_edvan IS NULL THEN
-        INSERT INTO auth.users (id, instance_id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, role, aud, created_at, updated_at)
-        VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000000', 'edvan2108@gmail.com', v_encrypted_pw, now(), '{"full_name":"Edvan"}'::jsonb, 'authenticated', 'authenticated', now(), now())
-        RETURNING id INTO v_id_edvan;
-    ELSE
-        UPDATE auth.users SET encrypted_password = v_encrypted_pw, email_confirmed_at = now() WHERE id = v_id_edvan;
-    END IF;
-
-    -- 2. Cria ou Atualiza Yasmin no auth.users
-    SELECT id INTO v_id_yasmin FROM auth.users WHERE email = 'yasmin.inaciomichels@gmail.com';
-    IF v_id_yasmin IS NULL THEN
-        INSERT INTO auth.users (id, instance_id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, role, aud, created_at, updated_at)
-        VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000000', 'yasmin.inaciomichels@gmail.com', v_encrypted_pw, now(), '{"full_name":"Yasmin"}'::jsonb, 'authenticated', 'authenticated', now(), now())
-        RETURNING id INTO v_id_yasmin;
-    ELSE
-        UPDATE auth.users SET encrypted_password = v_encrypted_pw, email_confirmed_at = now() WHERE id = v_id_yasmin;
-    END IF;
-
-    -- 3. Cria ou Atualiza Super Admin no auth.users
-    SELECT id INTO v_id_admin FROM auth.users WHERE email = 'admin@exemplo.com';
-    IF v_id_admin IS NULL THEN
-        INSERT INTO auth.users (id, instance_id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, role, aud, created_at, updated_at)
-        VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000000', 'admin@exemplo.com', v_encrypted_pw, now(), '{"full_name":"Super Administrador"}'::jsonb, 'authenticated', 'authenticated', now(), now())
-        RETURNING id INTO v_id_admin;
-    ELSE
-        UPDATE auth.users SET encrypted_password = v_encrypted_pw, email_confirmed_at = now() WHERE id = v_id_admin;
-    END IF;
-
-    -- 4. Atualiza tabela de perfis (public.usuarios)
-    INSERT INTO public.usuarios (id, email, nome, is_super_admin) VALUES (v_id_edvan, 'edvan2108@gmail.com', 'Edvan', false) ON CONFLICT (id) DO UPDATE SET is_super_admin = false, nome = 'Edvan', email = 'edvan2108@gmail.com';
-    INSERT INTO public.usuarios (id, email, nome, is_super_admin) VALUES (v_id_yasmin, 'yasmin.inaciomichels@gmail.com', 'Yasmin', false) ON CONFLICT (id) DO UPDATE SET is_super_admin = false, nome = 'Yasmin', email = 'yasmin.inaciomichels@gmail.com';
-    INSERT INTO public.usuarios (id, email, nome, is_super_admin) VALUES (v_id_admin, 'admin@exemplo.com', 'Super Administrador', true) ON CONFLICT (id) DO UPDATE SET is_super_admin = true, nome = 'Super Administrador';
-
-    -- 5. Executa a migração legada
-    PERFORM public.migrar_familia_legada_edvan_yasmin('edvan2108@gmail.com', 'yasmin.inaciomichels@gmail.com');
 END $$;

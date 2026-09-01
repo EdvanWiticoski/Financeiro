@@ -5,6 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Finanças Duo - Terminal Financeiro & Rateio de Casal</title>
   
+  <!-- Preconnect & DNS Prefetch para CDNs Críticas (Performance de Carregamento) -->
+  <link rel="preconnect" href="https://unpkg.com" crossorigin />
+  <link rel="dns-prefetch" href="https://unpkg.com" />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net" />
+  <link rel="preconnect" href="https://cdn.tailwindcss.com" crossorigin />
+  <link rel="dns-prefetch" href="https://cdn.tailwindcss.com" />
+  <link rel="preconnect" href="https://js.sentry-cdn.com" crossorigin />
+  <link rel="dns-prefetch" href="https://js.sentry-cdn.com" />
+  
   <!-- Tailwind CSS com Dark Mode -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -41,6 +51,24 @@
   <!-- Canvas Confetti para Gamificação e Celebrações -->
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
   
+  <!-- Sentry Browser Loader Oficial (Monitoramento & Rastreamento em Produção) -->
+  <script src="https://js.sentry-cdn.com/01880296f90e0aa57e541aaf1d0809aa.min.js" crossorigin="anonymous"></script>
+  <script>
+    window.sentryOnLoad = function () {
+      if (window.Sentry) {
+        try {
+          window.Sentry.init({
+            environment: (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? 'development' : 'production',
+            tracesSampleRate: 0.2
+          });
+          console.log("[MONITORING] Sentry Loader oficial conectado com sucesso.");
+        } catch(e) {
+          console.warn("[MONITORING] Aviso Sentry Loader:", e);
+        }
+      }
+    };
+  </script>
+
   <!-- Babel Standalone -->
   <script src="https://unpkg.com/@babel/standalone@7.24.0/babel.min.js"></script>
   
@@ -76,24 +104,43 @@
   <script>
     window.addEventListener('error', function(e) {
       if (e.message === 'Script error.' && !e.filename) return;
-      var b = document.getElementById('debug-error-banner');
-      if (b) {
-        b.style.display = 'block';
-        b.innerHTML = '<strong>❌ ERRO JAVASCRIPT:</strong> ' + (e.message || e.error) + '<br>Arquivo: ' + e.filename + ' Linha: ' + e.lineno + '<br><pre>' + (e.error ? e.error.stack : '') + '</pre>';
+      if (window.__ENV__?.DEBUG === 'true') {
+        var b = document.getElementById('debug-error-banner');
+        if (b) {
+          b.style.display = 'block';
+          b.innerHTML = '<strong>❌ ERRO JAVASCRIPT:</strong> ' + (e.message || e.error) + '<br>Arquivo: ' + e.filename + ' Linha: ' + e.lineno + '<br><pre>' + (e.error ? e.error.stack : '') + '</pre>';
+        }
+      }
+      if (window.Sentry && e.error) {
+        window.Sentry.captureException(e.error);
       }
       console.error("Window Error:", e);
     });
     window.addEventListener('unhandledrejection', function(e) {
-      var b = document.getElementById('debug-error-banner');
-      if (b) {
-        b.style.display = 'block';
-        b.innerHTML = '<strong>❌ PROMISE ERROR:</strong> ' + (e.reason ? (e.reason.stack || e.reason) : 'Rejeição não tratada');
+      if (window.__ENV__?.DEBUG === 'true') {
+        var b = document.getElementById('debug-error-banner');
+        if (b) {
+          b.style.display = 'block';
+          b.innerHTML = '<strong>❌ PROMISE ERROR:</strong> ' + (e.reason ? (e.reason.stack || e.reason) : 'Rejeição não tratada');
+        }
+      }
+      if (window.Sentry && e.reason) {
+        window.Sentry.captureException(e.reason);
       }
       console.error("Promise Error:", e);
     });
   </script>
 
-  <div id="root" class="h-full"></div>
+  <div id="root" class="h-full">
+    <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: #0f172a; color: #f8fafc; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+      <div style="width: 48px; height: 48px; border: 4px solid #334155; border-top-color: #6366f1; border-radius: 50%; animation: finSpin 0.8s linear infinite; margin-bottom: 20px;"></div>
+      <div style="font-size: 18px; font-weight: 800; letter-spacing: -0.025em; color: #ffffff; margin-bottom: 6px;">Finanças Duo</div>
+      <div style="font-size: 13px; color: #94a3b8; font-weight: 500;">Carregando Finanças Duo…</div>
+      <style>
+        @keyframes finSpin { to { transform: rotate(360deg); } }
+      </style>
+    </div>
+  </div>
 
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef } = React;
@@ -156,21 +203,35 @@
     const ActivityIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>;
     const LogOutIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>;
 
-    // RFC 5545 RRULE Parser Universal com suporte a COUNT e Parcelamento
+    // ========================================================================
+    // UTILITÁRIOS ROBUSTOS DE RECORRÊNCIA E CÁLCULO TEMPORAL (CLAMPEADO)
+    // ========================================================================
+    function addMonthsClamped(year, month, day, monthsToAdd) {
+      const targetMonth = month + monthsToAdd;
+      const lastDayOfTargetMonth = new Date(year, targetMonth + 1, 0).getDate();
+      return new Date(year, targetMonth, Math.min(day, lastDayOfTargetMonth), 12, 0, 0);
+    }
+
+    function parseRRule(rruleString) {
+      const parts = {};
+      (rruleString || '').replace(/^RRULE:/i, '').split(';').forEach(p => {
+        const [k, v] = p.split('=');
+        if (k && v) parts[k.trim().toUpperCase()] = v.trim();
+      });
+      return {
+        freq: parts.FREQ || 'MONTHLY',
+        interval: parseInt(parts.INTERVAL || '1', 10),
+        byMonthDay: parts.BYMONTHDAY ? parseInt(parts.BYMONTHDAY, 10) : null,
+        count: parts.COUNT ? parseInt(parts.COUNT, 10) : null,
+      };
+    }
+
+    // RFC 5545 RRULE Parser Universal com suporte a COUNT e Parcelamento Clampeado
     const projectRRuleOccurrences = (pattern, startDateStr, endDateStr) => {
       const occurrences = [];
       if (!pattern || pattern.active === false) return occurrences;
 
-      const parts = {};
-      (pattern.rrule || '').replace(/^RRULE:/i, '').split(';').forEach(p => {
-        const [k, v] = p.split('=');
-        if (k && v) parts[k.trim().toUpperCase()] = v.trim();
-      });
-
-      const freq = parts.FREQ || 'MONTHLY';
-      const interval = parseInt(parts.INTERVAL || '1', 10);
-      const byMonthDay = parts.BYMONTHDAY ? parseInt(parts.BYMONTHDAY, 10) : null;
-      const count = parts.COUNT ? parseInt(parts.COUNT, 10) : null;
+      const { freq, interval, byMonthDay, count } = parseRRule(pattern.rrule);
 
       // Data de início do padrão
       const pStartParts = (pattern.start_date || startDateStr).split('-').map(Number);
@@ -220,7 +281,7 @@
         }
 
         if (freq === 'MONTHLY') {
-          cur = new Date(cur.getFullYear(), cur.getMonth() + interval, pStartDay, 12, 0, 0);
+          cur = addMonthsClamped(pStartYear, pStartMonth, pStartDay, iteration * interval);
         } else if (freq === 'WEEKLY') {
           cur = new Date(cur.getTime() + interval * 7 * 86400000);
         } else if (freq === 'YEARLY') {
@@ -236,16 +297,8 @@
     // Projeção Completa de Todos os Meses de uma Recorrência (Para Linha do Tempo / Cronograma Mês a Mês)
     const projectAllRecurrenceMonths = (pattern, maxMonths = 36) => {
       if (!pattern) return [];
-      const parts = {};
-      (pattern.rrule || '').replace(/^RRULE:/i, '').split(';').forEach(p => {
-        const [k, v] = p.split('=');
-        if (k && v) parts[k.trim().toUpperCase()] = v.trim();
-      });
-
-      const freq = parts.FREQ || 'MONTHLY';
-      const interval = parseInt(parts.INTERVAL || '1', 10);
-      const count = parts.COUNT ? parseInt(parts.COUNT, 10) : null;
-      const dayOfMonth = parseInt(parts.BYMONTHDAY || '10', 10);
+      const { freq, interval, count, byMonthDay } = parseRRule(pattern.rrule);
+      const dayOfMonth = byMonthDay || 10;
 
       const [pStartYear, pStartMonth, pStartDay] = (pattern.start_date || '2026-01-01').split('-').map(Number);
       const targetCount = count || maxMonths;
@@ -281,7 +334,7 @@
         });
 
         if (freq === 'MONTHLY') {
-          cur = new Date(cur.getFullYear(), cur.getMonth() + interval, dayOfMonth || pStartDay, 12, 0, 0);
+          cur = addMonthsClamped(pStartYear, pStartMonth - 1, dayOfMonth || pStartDay, iteration * interval);
         } else if (freq === 'WEEKLY') {
           cur = new Date(cur.getTime() + interval * 7 * 86400000);
         } else if (freq === 'YEARLY') {
@@ -320,6 +373,7 @@
       const [ownerName, setOwnerName] = useState(() => localStorage.getItem('fin_owner_name') || '');
       const [partnerName, setPartnerName] = useState(() => localStorage.getItem('fin_partner_name') || '');
       const [onboardingCompleted, setOnboardingCompleted] = useState(() => localStorage.getItem('fin_onboarding_completed') === 'true');
+      const [loadingSmartDefaults, setLoadingSmartDefaults] = useState(false);
 
       const hoje = new Date();
       const hojeStr = hoje.toISOString().split('T')[0];
@@ -334,13 +388,11 @@
       const [filtroPeriodoDiario, setFiltroPeriodoDiario] = useState('mes');
 
       const [supabaseUrl, setSupabaseUrl] = useState(() => 
-        localStorage.getItem('fin_supabase_url') || 
         (typeof window !== 'undefined' && (window.__ENV__?.NEXT_PUBLIC_SUPABASE_URL || window.__ENV__?.VITE_SUPABASE_URL || window.__ENV__?.SUPABASE_URL)) || 
         (typeof process !== 'undefined' && process.env && (process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL)) ||
         'https://bcogbqbasyezzuwanhmp.supabase.co'
       );
       const [supabaseKey, setSupabaseKey] = useState(() => 
-        localStorage.getItem('fin_supabase_key') || 
         (typeof window !== 'undefined' && (window.__ENV__?.NEXT_PUBLIC_SUPABASE_ANON_KEY || window.__ENV__?.VITE_SUPABASE_ANON_KEY || window.__ENV__?.SUPABASE_ANON_KEY)) || 
         (typeof process !== 'undefined' && process.env && (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY)) ||
         'sb_publishable_-KY6IgO7_OVAV9EG9KUsOQ_CuX8mKmd'
@@ -398,6 +450,7 @@
       const [modalReavaliacao, setModalReavaliacao] = useState({ show: false, account: null });
       const [modalOrcamento, setModalOrcamento] = useState({ show: false, account: null, currentAmount: 0, isCustom: false });
       const [modalEditarVencimento, setModalEditarVencimento] = useState({ show: false, item: null, novoValor: 0, novaData: '', novaDescricao: '', modoRecorrencia: 'todas' });
+      const [modalExcluirVencimento, setModalExcluirVencimento] = useState({ show: false, item: null, modo: 'apenas_esta' });
       const [familias, setFamilias] = useState([]);
       const [familiaAtiva, setFamiliaAtiva] = useState(null);
       const [membrosFamilia, setMembrosFamilia] = useState([]);
@@ -408,7 +461,7 @@
       const [migracaoForm, setMigracaoForm] = useState({ emailEdvan: 'edvan2108@gmail.com', emailYasmin: 'yasmin.inaciomichels@gmail.com', loading: false, result: null });
       const [adminSearch, setAdminSearch] = useState('');
 
-      // Autenticação Unificada, Recuperação de Senha & MFA Interception
+      // Autenticação Unificada & Recuperação de Senha
       const [authUser, setAuthUser] = useState(null);
       const [authMode, setAuthMode] = useState('login'); // 'login' | 'cadastro' | 'esqueci_senha' | 'redefinir_senha'
       const [authEmail, setAuthEmail] = useState('');
@@ -417,12 +470,6 @@
       const [authNovaSenha, setAuthNovaSenha] = useState('');
       const [authConfirmaSenha, setAuthConfirmaSenha] = useState('');
       const [authLoading, setAuthLoading] = useState(false);
-      const [loginAttempts, setLoginAttempts] = useState(0);
-      const [lockUntil, setLockUntil] = useState(0);
-      const [mfaRequired, setMfaRequired] = useState(false);
-      const [mfaCode, setMfaCode] = useState('');
-      const [mfaLoading, setMfaLoading] = useState(false);
-      const [tempAuthUser, setTempAuthUser] = useState(null);
 
       // Perfil do Usuário ("Meu Perfil")
       const [userProfile, setUserProfile] = useState(() => {
@@ -441,7 +488,12 @@
       const [uploadingAvatar, setUploadingAvatar] = useState(false);
       const [emailChangeNotice, setEmailChangeNotice] = useState('');
       const fileInputRef = useRef(null);
-      const [configTab, setConfigTab] = useState('perfil'); // 'perfil' | 'familia'
+      const carregandoRef = useRef(false);
+      const [configTab, setConfigTab] = useState('perfil'); // 'perfil' | 'familia' | 'excluir'
+      const [exclusaoContaInput, setExclusaoContaInput] = useState('');
+      const [excluindoConta, setExcluindoConta] = useState(false);
+      const [historicoCompletoCarregado, setHistoricoCompletoCarregado] = useState(false);
+      const [carregandoHistorico, setCarregandoHistorico] = useState(false);
       const [zbbAbaAtiva, setZbbAbaAtiva] = useState('despesas'); // 'despesas' | 'receitas'
       const [filtroTitularZbb, setFiltroTitularZbb] = useState('ambos'); // 'ambos' | 'owner' | 'partner'
       const [filtroZbbStatus, setFiltroZbbStatus] = useState('todos'); // 'todos' | 'com_orcamento' | 'sem_orcamento'
@@ -500,142 +552,149 @@
         return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor || 0);
       };
 
-      // Identificação Resiliente de Titularidade (Hierarquia Estrita: Titular Explícito > Tags > Ownership)
-      const isOwnerInvest = (item, acc) => {
-        const oName = (ownerName || 'edvan').trim().toLowerCase();
-        const pName = (partnerName || 'yasmin').trim().toLowerCase();
+      // Identificação Unificada de Peso de Titularidade (0.0 a 1.0) por Perspectiva ('owner' | 'partner' | 'ambos')
+      const getTitularWeight = (item, acc, perspectiva = 'ambos') => {
+        if (perspectiva === 'ambos') return 1.0;
+        if (!item && !acc) return perspectiva === 'owner' ? 1.0 : 0.0;
+
+        const oName = (ownerName || '').trim().toLowerCase();
+        const pName = (partnerName || '').trim().toLowerCase();
+        
         const tTitular = (item?.titular || '').trim().toLowerCase();
         const aTitular = (acc?.titular || '').trim().toLowerCase();
-        const desc = (item?.description || item?.name || '').toLowerCase();
-        const own = item?.ownership_type || '';
+        const own = item?.ownership_type || acc?.ownership_type || '';
 
-        // Se tiver titular explícito de Yasmin, NUNCA é do Edvan
-        if (tTitular === pName || tTitular === 'yasmin' || aTitular === pName || aTitular === 'yasmin') return false;
+        // 1. Critério Estrutural Primário: ownership_type
+        if (own === 'owner_only') return perspectiva === 'owner' ? 1.0 : 0.0;
+        if (own === 'partner_only') return perspectiva === 'partner' ? 1.0 : 0.0;
+        if (own === 'shared_50_50' || tTitular === 'ambos' || aTitular === 'ambos') return 0.5;
 
-        // Se tiver titular explícito de Edvan
-        if (tTitular === oName || tTitular === 'edvan' || tTitular === 'titular') return true;
-        if (aTitular === oName || aTitular === 'edvan' || aTitular === 'titular') return true;
-        if (desc.includes('edvan')) return true;
-        if (own === 'owner_only' && !desc.includes('yasmin')) return true;
-        return false;
+        // 2. Critério Secundário: Titularidade Explícita no Lançamento ou na Conta
+        if (pName && (tTitular === pName || aTitular === pName || tTitular === 'parceiro' || tTitular === 'parceira' || aTitular === 'parceiro' || aTitular === 'parceira')) {
+          return perspectiva === 'partner' ? 1.0 : 0.0;
+        }
+        if (oName && (tTitular === oName || aTitular === oName || tTitular === 'titular' || aTitular === 'titular' || tTitular === 'eu' || aTitular === 'eu')) {
+          return perspectiva === 'owner' ? 1.0 : 0.0;
+        }
+
+        // 3. Padrão Estrutural (Decisão de Produto: 100% Titular / Dono do Registro)
+        return perspectiva === 'owner' ? 1.0 : 0.0;
       };
 
-      const isPartnerInvest = (item, acc) => {
-        const oName = (ownerName || 'edvan').trim().toLowerCase();
-        const pName = (partnerName || 'yasmin').trim().toLowerCase();
-        const tTitular = (item?.titular || '').trim().toLowerCase();
-        const aTitular = (acc?.titular || '').trim().toLowerCase();
-        const desc = (item?.description || item?.name || '').toLowerCase();
-        const own = item?.ownership_type || '';
-
-        // Se tiver titular explícito de Edvan, NUNCA é da Yasmin
-        if (tTitular === oName || tTitular === 'edvan' || aTitular === oName || aTitular === 'edvan') return false;
-
-        // Se tiver titular explícito de Yasmin
-        if (tTitular === pName || tTitular === 'yasmin' || tTitular === 'parceiro' || tTitular === 'parceira') return true;
-        if (aTitular === pName || aTitular === 'yasmin' || aTitular === 'parceiro' || aTitular === 'parceira') return true;
-        if (desc.includes('yasmin')) return true;
-        if (own === 'partner_only' && !desc.includes('edvan')) return true;
-        return false;
-      };
+      const isOwnerInvest = (item, acc) => getTitularWeight(item, acc, 'owner') > 0;
+      const isPartnerInvest = (item, acc) => getTitularWeight(item, acc, 'partner') > 0;
 
       // Provisionamento Inicial Orgânico Completo e Estruturado (Smart Defaults)
       const provisionarSmartDefaults = async () => {
+        if (loadingSmartDefaults) return;
+        setLoadingSmartDefaults(true);
         triggerHaptic('success');
-        const defaultAccounts = [
-          // 1. ATIVOS
-          { id: generateUUID(), name: 'Conta Corrente Principal', account_type: 'ASSET', subtype: 'checking', titular: 'Ambos', color: '#3b82f6', is_active: true },
-          { id: generateUUID(), name: 'Dinheiro na Carteira', account_type: 'ASSET', subtype: 'cash', titular: 'Ambos', color: '#10b981', is_active: true },
-          { id: generateUUID(), name: 'Reserva de Emergência', account_type: 'ASSET', subtype: 'savings', titular: 'Ambos', color: '#059669', is_active: true },
-          { id: generateUUID(), name: 'Vale Alimentação / Refeição', account_type: 'ASSET', subtype: 'benefit', titular: 'Ambos', color: '#14b8a6', is_active: true },
-          { id: generateUUID(), name: 'Investimentos', account_type: 'ASSET', subtype: 'investment', titular: 'Ambos', color: '#6366f1', is_active: true },
+        try {
+          const defaultAccounts = [
+            // 1. ATIVOS
+            { id: generateUUID(), name: 'Conta Corrente Principal', account_type: 'ASSET', subtype: 'checking', titular: 'Ambos', color: '#3b82f6', is_active: true },
+            { id: generateUUID(), name: 'Dinheiro na Carteira', account_type: 'ASSET', subtype: 'cash', titular: 'Ambos', color: '#10b981', is_active: true },
+            { id: generateUUID(), name: 'Reserva de Emergência', account_type: 'ASSET', subtype: 'savings', titular: 'Ambos', color: '#059669', is_active: true },
+            { id: generateUUID(), name: 'Vale Alimentação / Refeição', account_type: 'ASSET', subtype: 'benefit', titular: 'Ambos', color: '#14b8a6', is_active: true },
+            { id: generateUUID(), name: 'Investimentos', account_type: 'ASSET', subtype: 'investment', titular: 'Ambos', color: '#6366f1', is_active: true },
 
-          // 2. PASSIVOS
-          { id: generateUUID(), name: 'Cartão de Crédito Principal', account_type: 'LIABILITY', subtype: 'credit_card', titular: 'Ambos', color: '#ef4444', is_active: true },
-          { id: generateUUID(), name: 'Empréstimo Pessoal', account_type: 'LIABILITY', subtype: 'loan', titular: 'Ambos', color: '#f43f5e', is_active: true },
-          { id: generateUUID(), name: 'Financiamento', account_type: 'LIABILITY', subtype: 'financing', titular: 'Ambos', color: '#e11d48', is_active: true },
-          { id: generateUUID(), name: 'Contas a Pagar (Terceiros)', account_type: 'LIABILITY', subtype: 'payable', titular: 'Ambos', color: '#be123c', is_active: true },
+            // 2. PASSIVOS
+            { id: generateUUID(), name: 'Cartão de Crédito Principal', account_type: 'LIABILITY', subtype: 'credit_card', titular: 'Ambos', color: '#ef4444', is_active: true },
+            { id: generateUUID(), name: 'Empréstimo Pessoal', account_type: 'LIABILITY', subtype: 'loan', titular: 'Ambos', color: '#f43f5e', is_active: true },
+            { id: generateUUID(), name: 'Financiamento', account_type: 'LIABILITY', subtype: 'financing', titular: 'Ambos', color: '#e11d48', is_active: true },
+            { id: generateUUID(), name: 'Contas a Pagar (Terceiros)', account_type: 'LIABILITY', subtype: 'payable', titular: 'Ambos', color: '#be123c', is_active: true },
 
-          // 3. RECEITAS
-          { id: generateUUID(), name: 'Salário Principal', account_type: 'REVENUE', subtype: 'salary', titular: 'Ambos', color: '#2563eb', is_active: true },
-          { id: generateUUID(), name: 'Rendimentos / Juros', account_type: 'REVENUE', subtype: 'investment', titular: 'Ambos', color: '#0d9488', is_active: true },
-          { id: generateUUID(), name: 'Renda Extra / Freelance', account_type: 'REVENUE', subtype: 'freelance', titular: 'Ambos', color: '#0284c7', is_active: true },
-          { id: generateUUID(), name: 'Reembolsos', account_type: 'REVENUE', subtype: 'refund', titular: 'Ambos', color: '#0891b2', is_active: true },
-          { id: generateUUID(), name: 'Vendas', account_type: 'REVENUE', subtype: 'sales', titular: 'Ambos', color: '#0ea5e9', is_active: true },
+            // 3. RECEITAS
+            { id: generateUUID(), name: 'Salário Principal', account_type: 'REVENUE', subtype: 'salary', titular: 'Ambos', color: '#2563eb', is_active: true },
+            { id: generateUUID(), name: 'Rendimentos / Juros', account_type: 'REVENUE', subtype: 'investment', titular: 'Ambos', color: '#0d9488', is_active: true },
+            { id: generateUUID(), name: 'Renda Extra / Freelance', account_type: 'REVENUE', subtype: 'freelance', titular: 'Ambos', color: '#0284c7', is_active: true },
+            { id: generateUUID(), name: 'Reembolsos', account_type: 'REVENUE', subtype: 'refund', titular: 'Ambos', color: '#0891b2', is_active: true },
+            { id: generateUUID(), name: 'Vendas', account_type: 'REVENUE', subtype: 'sales', titular: 'Ambos', color: '#0ea5e9', is_active: true },
 
-          // 4. DESPESAS
-          // Moradia
-          { id: generateUUID(), name: 'Aluguel / Prestação', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#4f46e5', is_active: true },
-          { id: generateUUID(), name: 'Condomínio', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#4338ca', is_active: true },
-          { id: generateUUID(), name: 'Energia Elétrica', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#6366f1', is_active: true },
-          { id: generateUUID(), name: 'Água', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#818cf8', is_active: true },
-          { id: generateUUID(), name: 'Internet', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#4f46e5', is_active: true },
+            // 4. DESPESAS
+            // Moradia
+            { id: generateUUID(), name: 'Aluguel / Prestação', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#4f46e5', is_active: true },
+            { id: generateUUID(), name: 'Condomínio', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#4338ca', is_active: true },
+            { id: generateUUID(), name: 'Energia Elétrica', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#6366f1', is_active: true },
+            { id: generateUUID(), name: 'Água', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#818cf8', is_active: true },
+            { id: generateUUID(), name: 'Internet', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#4f46e5', is_active: true },
 
-          // Alimentação
-          { id: generateUUID(), name: 'Supermercado', account_type: 'EXPENSE', subtype: 'variable_expense', titular: 'Ambos', color: '#ea580c', is_active: true },
-          { id: generateUUID(), name: 'Restaurantes / Delivery', account_type: 'EXPENSE', subtype: 'variable_expense', titular: 'Ambos', color: '#f97316', is_active: true },
-          { id: generateUUID(), name: 'Padaria / Lanches', account_type: 'EXPENSE', subtype: 'variable_expense', titular: 'Ambos', color: '#fb923c', is_active: true },
+            // Alimentação
+            { id: generateUUID(), name: 'Supermercado', account_type: 'EXPENSE', subtype: 'variable_expense', titular: 'Ambos', color: '#ea580c', is_active: true },
+            { id: generateUUID(), name: 'Restaurantes / Delivery', account_type: 'EXPENSE', subtype: 'variable_expense', titular: 'Ambos', color: '#f97316', is_active: true },
+            { id: generateUUID(), name: 'Padaria / Lanches', account_type: 'EXPENSE', subtype: 'variable_expense', titular: 'Ambos', color: '#fb923c', is_active: true },
 
-          // Transporte
-          { id: generateUUID(), name: 'Combustível', account_type: 'EXPENSE', subtype: 'variable_expense', titular: 'Ambos', color: '#ca8a04', is_active: true },
-          { id: generateUUID(), name: 'Aplicativos (Uber/99)', account_type: 'EXPENSE', subtype: 'variable_expense', titular: 'Ambos', color: '#eab308', is_active: true },
-          { id: generateUUID(), name: 'Transporte Público', account_type: 'EXPENSE', subtype: 'variable_expense', titular: 'Ambos', color: '#facc15', is_active: true },
-          { id: generateUUID(), name: 'Manutenção do Veículo', account_type: 'EXPENSE', subtype: 'occasional', titular: 'Ambos', color: '#d97706', is_active: true },
+            // Transporte
+            { id: generateUUID(), name: 'Combustível', account_type: 'EXPENSE', subtype: 'variable_expense', titular: 'Ambos', color: '#ca8a04', is_active: true },
+            { id: generateUUID(), name: 'Aplicativos (Uber/99)', account_type: 'EXPENSE', subtype: 'variable_expense', titular: 'Ambos', color: '#eab308', is_active: true },
+            { id: generateUUID(), name: 'Transporte Público', account_type: 'EXPENSE', subtype: 'variable_expense', titular: 'Ambos', color: '#facc15', is_active: true },
+            { id: generateUUID(), name: 'Manutenção do Veículo', account_type: 'EXPENSE', subtype: 'occasional', titular: 'Ambos', color: '#d97706', is_active: true },
 
-          // Saúde
-          { id: generateUUID(), name: 'Plano de Saúde', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#dc2626', is_active: true },
-          { id: generateUUID(), name: 'Farmácia', account_type: 'EXPENSE', subtype: 'variable_expense', titular: 'Ambos', color: '#ef4444', is_active: true },
-          { id: generateUUID(), name: 'Consultas / Exames', account_type: 'EXPENSE', subtype: 'occasional', titular: 'Ambos', color: '#b91c1c', is_active: true },
+            // Saúde
+            { id: generateUUID(), name: 'Plano de Saúde', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#dc2626', is_active: true },
+            { id: generateUUID(), name: 'Farmácia', account_type: 'EXPENSE', subtype: 'variable_expense', titular: 'Ambos', color: '#ef4444', is_active: true },
+            { id: generateUUID(), name: 'Consultas / Exames', account_type: 'EXPENSE', subtype: 'occasional', titular: 'Ambos', color: '#b91c1c', is_active: true },
 
-          // Lazer & Estilo de Vida
-          { id: generateUUID(), name: 'Assinaturas (Streaming/Serviços)', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#8b5cf6', is_active: true },
-          { id: generateUUID(), name: 'Saídas / Bares', account_type: 'EXPENSE', subtype: 'variable_expense', titular: 'Ambos', color: '#a855f7', is_active: true },
-          { id: generateUUID(), name: 'Hobbies', account_type: 'EXPENSE', subtype: 'occasional', titular: 'Ambos', color: '#7c3aed', is_active: true },
+            // Lazer & Estilo de Vida
+            { id: generateUUID(), name: 'Assinaturas (Streaming/Serviços)', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#8b5cf6', is_active: true },
+            { id: generateUUID(), name: 'Saídas / Bares', account_type: 'EXPENSE', subtype: 'variable_expense', titular: 'Ambos', color: '#a855f7', is_active: true },
+            { id: generateUUID(), name: 'Hobbies', account_type: 'EXPENSE', subtype: 'occasional', titular: 'Ambos', color: '#7c3aed', is_active: true },
 
-          // Educação
-          { id: generateUUID(), name: 'Cursos / Mensalidades', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#0284c7', is_active: true },
-          { id: generateUUID(), name: 'Livros / Materiais', account_type: 'EXPENSE', subtype: 'occasional', titular: 'Ambos', color: '#0ea5e9', is_active: true },
+            // Educação
+            { id: generateUUID(), name: 'Cursos / Mensalidades', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#0284c7', is_active: true },
+            { id: generateUUID(), name: 'Livros / Materiais', account_type: 'EXPENSE', subtype: 'occasional', titular: 'Ambos', color: '#0ea5e9', is_active: true },
 
-          // Cuidados Pessoais
-          { id: generateUUID(), name: 'Academia / Esportes', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#ec4899', is_active: true },
-          { id: generateUUID(), name: 'Vestuário', account_type: 'EXPENSE', subtype: 'variable_expense', titular: 'Ambos', color: '#f472b6', is_active: true },
-          { id: generateUUID(), name: 'Salão / Estética', account_type: 'EXPENSE', subtype: 'occasional', titular: 'Ambos', color: '#db2777', is_active: true },
+            // Cuidados Pessoais
+            { id: generateUUID(), name: 'Academia / Esportes', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#ec4899', is_active: true },
+            { id: generateUUID(), name: 'Vestuário', account_type: 'EXPENSE', subtype: 'variable_expense', titular: 'Ambos', color: '#f472b6', is_active: true },
+            { id: generateUUID(), name: 'Salão / Estética', account_type: 'EXPENSE', subtype: 'occasional', titular: 'Ambos', color: '#db2777', is_active: true },
 
-          // Outros / Financeiro
-          { id: generateUUID(), name: 'Taxas Bancárias', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#64748b', is_active: true },
-          { id: generateUUID(), name: 'Juros', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#475569', is_active: true },
-          { id: generateUUID(), name: 'Presentes / Doações', account_type: 'EXPENSE', subtype: 'occasional', titular: 'Ambos', color: '#94a3b8', is_active: true }
-        ];
+            // Outros / Financeiro
+            { id: generateUUID(), name: 'Taxas Bancárias', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#64748b', is_active: true },
+            { id: generateUUID(), name: 'Juros', account_type: 'EXPENSE', subtype: 'fixed_expense', titular: 'Ambos', color: '#475569', is_active: true },
+            { id: generateUUID(), name: 'Presentes / Doações', account_type: 'EXPENSE', subtype: 'occasional', titular: 'Ambos', color: '#94a3b8', is_active: true }
+          ];
 
-        setAccounts(defaultAccounts);
-        setOnboardingCompleted(true);
-        localStorage.setItem('fin_acc_v3', JSON.stringify(defaultAccounts));
-        localStorage.setItem('fin_onboarding_completed', 'true');
+          setAccounts(defaultAccounts);
+          setOnboardingCompleted(true);
+          localStorage.setItem('fin_acc_v3', JSON.stringify(defaultAccounts));
+          localStorage.setItem('fin_onboarding_completed', 'true');
 
-        if (supabase) {
-          try {
-            await supabase.from('user_settings').upsert({
-              owner_name: ownerName,
-              partner_name: partnerName,
-              onboarding_completed: true,
-              onboarding_decision: 'smart_defaults',
-              updated_at: new Date().toISOString()
-            });
-            const defaultAccountsWithFam = defaultAccounts.map(a => ({
-              ...a,
-              familia_id: familiaAtiva?.id || null
-            }));
-            const { error: insErr } = await supabase.from('accounts').insert(defaultAccountsWithFam);
-            if (insErr) {
-              console.warn("Aviso na inserção direta, aplicando RPC...", insErr);
-              await supabase.rpc('seed_default_accounts_for_current_user');
+          if (supabase) {
+            try {
+              const { error: setErr } = await supabase.from('user_settings').upsert({
+                owner_name: ownerName,
+                partner_name: partnerName,
+                onboarding_completed: true,
+                onboarding_decision: 'smart_defaults',
+                updated_at: new Date().toISOString()
+              });
+              if (setErr) console.warn("Aviso ao salvar settings:", setErr.message);
+
+              const defaultAccountsWithFam = defaultAccounts.map(a => ({
+                ...a,
+                familia_id: familiaAtiva?.id || null
+              }));
+              const { error: insErr } = await supabase.from('accounts').upsert(defaultAccountsWithFam, {
+                onConflict: 'familia_id,name,account_type',
+                ignoreDuplicates: true
+              });
+              if (insErr) {
+                console.warn("Aviso na inserção direta, aplicando RPC...", insErr);
+                const { error: rpcErr } = await supabase.rpc('seed_default_accounts_for_current_user');
+                if (rpcErr) throw rpcErr;
+              }
+              await carregarDados();
+            } catch (e) {
+              console.error("Erro no provisionamento Supabase:", e);
+              showToast(`Erro ao gravar contas no banco: ${e.message}`);
+              return;
             }
-            await carregarDados();
-          } catch (e) {
-            console.error("Erro no provisionamento Supabase:", e);
           }
+          showToast("Estrutura completa recomendada criada e salva no banco de dados!");
+        } finally {
+          setLoadingSmartDefaults(false);
         }
-        showToast("Estrutura completa recomendada criada e salva no banco de dados!");
       };
 
       const dispensarOnboarding = async (decision = 'custom') => {
@@ -644,15 +703,17 @@
         localStorage.setItem('fin_onboarding_completed', 'true');
         if (supabase) {
           try {
-            await supabase.from('user_settings').upsert({
+            const { error: setErr } = await supabase.from('user_settings').upsert({
               owner_name: ownerName,
               partner_name: partnerName,
               onboarding_completed: true,
               onboarding_decision: decision,
               updated_at: new Date().toISOString()
             });
+            if (setErr) throw setErr;
           } catch (e) {
             console.error("Erro ao salvar decisão de onboarding:", e);
+            showToast(`Aviso: ${e.message}`);
           }
         }
         showToast(decision === 'custom' ? "Opção salva: Você configurará suas contas manualmente." : "Card dispensado.");
@@ -678,14 +739,13 @@
       const normalizarItemTitular = (item) => {
         if (!item) return item;
         const tTitular = (item.titular || '').trim().toLowerCase();
-        const desc = (item.description || item.name || '').toLowerCase();
-        if (partnerName && (tTitular === partnerName.toLowerCase() || desc.includes(partnerName.toLowerCase()))) {
-          if (item.ownership_type === 'owner_only' || !item.ownership_type) {
+        if (partnerName && (tTitular === partnerName.toLowerCase() || tTitular === 'parceiro' || tTitular === 'parceira')) {
+          if (!item.ownership_type) {
             return { ...item, ownership_type: 'partner_only' };
           }
         }
-        if (ownerName && (tTitular === ownerName.toLowerCase() || desc.includes(ownerName.toLowerCase()))) {
-          if (item.ownership_type === 'partner_only' || !item.ownership_type) {
+        if (ownerName && (tTitular === ownerName.toLowerCase() || tTitular === 'titular' || tTitular === 'eu')) {
+          if (!item.ownership_type) {
             return { ...item, ownership_type: 'owner_only' };
           }
         }
@@ -700,7 +760,11 @@
         return list.map(normalizarItemTitular);
       };
 
-      const carregarDados = async () => {
+      const carregarDados = async (options = {}) => {
+        if (carregandoRef.current) return;
+        carregandoRef.current = true;
+
+        const { completo = false, mesesHistorico = 6 } = typeof options === 'boolean' ? { completo: options } : options;
         if (!supabase) {
           const locAcc = localStorage.getItem('fin_acc_v3');
           const locTrans = localStorage.getItem('fin_trans_v3');
@@ -735,42 +799,51 @@
           const myName = user.user_metadata?.full_name || (user.email?.includes('edvan') ? 'Edvan' : (user.email?.includes('yasmin') ? 'Yasmin' : user.email?.split('@')[0])) || 'Usuário';
           setOwnerName(myName);
 
-          // 2. Busca as famílias e membros vinculados a este usuário de forma independente e direta
-          const [membRes, famRes] = await Promise.all([
+          // 2. Busca as famílias, membros e configurações de preferências vinculados a este usuário
+          const [membRes, famRes, setRes] = await Promise.all([
             supabase.from('membros_familia').select('*').eq('user_id', currentUserId),
-            supabase.from('familias').select('*')
+            supabase.from('familias').select('*'),
+            supabase.from('user_settings').select('*').eq('user_id', currentUserId).maybeSingle()
           ]);
 
           const userMemberships = membRes.data || [];
           const userFamilies = famRes.data || [];
+          const userSettingsData = setRes?.data || null;
 
-          // Seleciona a família ativa priorizando "Família Edvan & Yasmin" se existir
-          let activeFam = userFamilies.find(f => f.nome && f.nome.toLowerCase().includes('edvan')) || 
-                         userFamilies.find(f => f.id === 'df2aeb45-8822-47fe-8b71-dfb3c4ff1399') ||
-                         userFamilies[0] || null;
-
-          let activeFamId = activeFam?.id || userMemberships[0]?.familia_id || null;
+          // Seleciona a família ativa baseando-se estritamente na coluna familia_id de user_settings
+          let activeFamId = userSettingsData?.familia_id ?? userMemberships[0]?.familia_id ?? null;
+          let activeFam = userFamilies.find(f => f.id === activeFamId) || userFamilies[0] || null;
+          if (activeFam && !activeFamId) activeFamId = activeFam.id;
 
           // Se o usuário ainda não tiver nenhuma família vinculada, provisiona sua Família Solo
           if (!activeFamId) {
             try {
-              const { data: newFam } = await supabase
+              const { data: newFam, error: famErr } = await supabase
                 .from('familias')
                 .insert([{ nome: 'Minha Família', criado_por: currentUserId }])
                 .select()
                 .single();
 
+              if (famErr) throw famErr;
+
               if (newFam) {
-                await supabase.from('membros_familia').insert([{
+                const { error: membErr } = await supabase.from('membros_familia').insert([{
                   familia_id: newFam.id,
                   user_id: currentUserId,
                   papel: 'admin',
                   nome_exibicao: myName
                 }]);
+                if (membErr) throw membErr;
                 activeFamId = newFam.id;
                 activeFam = newFam;
                 userFamilies.push(newFam);
                 userMemberships.push({ familia_id: newFam.id, user_id: currentUserId, papel: 'admin', nome_exibicao: myName });
+
+                await supabase.from('user_settings').upsert({
+                  user_id: currentUserId,
+                  familia_id: newFam.id,
+                  updated_at: new Date().toISOString()
+                }, { onConflict: 'user_id' });
               }
             } catch(e) {
               console.warn("Auto-provisionamento família solo:", e);
@@ -804,28 +877,18 @@
 
           // 4. Carrega os dados financeiros da família ativa
           if (activeFamId) {
-            const isEdvanFamily = activeFamId === 'df2aeb45-8822-47fe-8b71-dfb3c4ff1399' || 
-                                  (activeFam?.nome && activeFam.nome.toLowerCase().includes('edvan')) ||
-                                  (user?.email && user.email.includes('edvan'));
-            
-            let accQuery = supabase.from('accounts').select('*');
-            let transQuery = supabase.from('transactions').select('*');
-            let budgQuery = supabase.from('budgets').select('*');
-            let recQuery = supabase.from('recurring_patterns').select('*');
-            let valQuery = supabase.from('investment_valuations').select('*');
+            let accQuery = supabase.from('accounts').select('*').eq('familia_id', activeFamId);
+            let transQuery = supabase.from('transactions').select('*').eq('familia_id', activeFamId);
+            let budgQuery = supabase.from('budgets').select('*').eq('familia_id', activeFamId);
+            let recQuery = supabase.from('recurring_patterns').select('*').eq('familia_id', activeFamId);
+            let valQuery = supabase.from('investment_valuations').select('*').eq('familia_id', activeFamId);
 
-            if (isEdvanFamily) {
-              accQuery = accQuery.or(`familia_id.eq.${activeFamId},familia_id.is.null`);
-              transQuery = transQuery.or(`familia_id.eq.${activeFamId},familia_id.is.null`);
-              budgQuery = budgQuery.or(`familia_id.eq.${activeFamId},familia_id.is.null`);
-              recQuery = recQuery.or(`familia_id.eq.${activeFamId},familia_id.is.null`);
-              valQuery = valQuery.or(`familia_id.eq.${activeFamId},familia_id.is.null`);
-            } else {
-              accQuery = accQuery.eq('familia_id', activeFamId);
-              transQuery = transQuery.eq('familia_id', activeFamId);
-              budgQuery = budgQuery.eq('familia_id', activeFamId);
-              recQuery = recQuery.eq('familia_id', activeFamId);
-              valQuery = valQuery.eq('familia_id', activeFamId);
+            // Filtro de performance: Por padrão limita a busca de transações aos últimos N meses
+            if (!completo) {
+              const dataLimite = new Date();
+              dataLimite.setMonth(dataLimite.getMonth() - (mesesHistorico || 6));
+              const dataLimiteStr = dataLimite.toISOString().split('T')[0];
+              transQuery = transQuery.gte('date', dataLimiteStr);
             }
 
             const [accRes, transRes, budgRes, recRes, setRes, valRes, usrRes] = await Promise.all([
@@ -895,6 +958,9 @@
             } else {
               setOnboardingCompleted(false);
             }
+            if (completo) {
+              setHistoricoCompletoCarregado(true);
+            }
           } else {
             // Sem família -> Zera tudo
             setAccounts([]);
@@ -904,9 +970,29 @@
             setRecurringPatterns([]);
             setInvestmentValuations([]);
             setOnboardingCompleted(false);
+            setHistoricoCompletoCarregado(false);
           }
         } catch (e) {
           console.warn("Aviso ao carregar dados do Supabase:", e);
+        } finally {
+          carregandoRef.current = false;
+        }
+      };
+
+      const carregarHistoricoCompleto = async (manual = false) => {
+        if (carregandoHistorico || historicoCompletoCarregado) return;
+        setCarregandoHistorico(true);
+        try {
+          if (manual) showToast("Carregando histórico financeiro completo... ⏳");
+          const res = await carregarDados({ completo: true });
+          setHistoricoCompletoCarregado(true);
+          if (manual) showToast("Histórico completo carregado com sucesso! 📚");
+          return res;
+        } catch (err) {
+          console.error("Erro ao carregar histórico:", err);
+          if (manual) showToast(`Erro ao carregar histórico: ${err.message}`);
+        } finally {
+          setCarregandoHistorico(false);
         }
       };
 
@@ -944,50 +1030,51 @@
         }
         const cleanCode = pCodigo ? pCodigo.trim() : '';
         if (!cleanCode || cleanCode.length < 4) {
-          showToast("Informe um código de convite ou ID da família válido.");
+          showToast("Informe um código de convite válido.");
           return;
         }
+
+        // 1. Verificação prévia: confere se a família atual (solo/pessoal) possui lançamentos ou categorias
+        if (familiaAtiva?.id) {
+          try {
+            const [txRes, accRes] = await Promise.all([
+              supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('familia_id', familiaAtiva.id),
+              supabase.from('accounts').select('id', { count: 'exact', head: true }).eq('familia_id', familiaAtiva.id)
+            ]);
+            const countTx = txRes.count ?? transactions.length;
+            const countAcc = accRes.count ?? accounts.length;
+
+            if (countTx > 0 || countAcc > 0) {
+              const confirmMsg = `Você tem ${countTx} lançamento(s) e ${countAcc} categoria(s) na sua área pessoal que não serão movidos automaticamente para a família compartilhada.\n\nDeseja continuar mesmo assim?`;
+              if (!window.confirm(confirmMsg)) {
+                return;
+              }
+            }
+          } catch (chkErr) {
+            console.warn("Aviso ao checar dados existentes da família:", chkErr);
+          }
+        }
+
         setModalConvite(prev => ({ ...prev, loading: true }));
         try {
-          // 1. Suporte a entrada direta pelo ID da Família (UUID)
-          if (cleanCode.length >= 32 && cleanCode.includes('-')) {
-            const { data: userData } = await supabase.auth.getUser();
-            const user = userData?.user;
-            if (!user) throw new Error("Sessão expirada. Faça login novamente.");
-
-            const { data: targetFam, error: famErr } = await supabase
-              .from('familias')
-              .select('*')
-              .eq('id', cleanCode)
-              .single();
-
-            if (famErr || !targetFam) throw new Error("Família não encontrada com esse ID.");
-
-            const myName = pNome ? pNome.trim() : (user.user_metadata?.full_name || user.email?.split('@')[0] || 'Membro');
-            const { error: insErr } = await supabase
-              .from('membros_familia')
-              .upsert({
-                familia_id: cleanCode,
-                user_id: user.id,
-                papel: 'membro',
-                nome_exibicao: myName
-              });
-
-            if (insErr) throw insErr;
-
-            setModalConvite(prev => ({ ...prev, show: false, loading: false, codigoParaEntrar: '' }));
-            triggerHaptic('success');
-            showToast(`Você entrou na família "${targetFam.nome}" com sucesso! 🏠`);
-            await carregarDados();
-            return;
-          }
-
-          // 2. Entrada pelo Código de Convite de 6 dígitos via RPC
+          // Entrada segura e autorizada exclusivamente pelo Código de Convite via RPC
           const { data, error } = await supabase.rpc('aceitar_convite_familia', {
             p_codigo_convite: cleanCode.toUpperCase(),
             p_nome_exibicao: pNome ? pNome.trim() : null
           });
           if (error) throw error;
+
+          const novaFamiliaId = data?.familia_id || (data && typeof data === 'object' ? data.id : null);
+          const { data: userData } = await supabase.auth.getUser();
+          const userId = userData?.user?.id;
+          if (userId && novaFamiliaId) {
+            await supabase.from('user_settings').upsert({
+              user_id: userId,
+              familia_id: novaFamiliaId,
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'user_id' });
+          }
+
           setModalConvite(prev => ({ ...prev, show: false, loading: false, codigoParaEntrar: '' }));
           triggerHaptic('success');
           showToast(data?.message || "Você entrou na família com sucesso! 🏠");
@@ -997,6 +1084,32 @@
           setModalConvite(prev => ({ ...prev, loading: false }));
           triggerHaptic('error');
           showToast(`Erro ao entrar na família: ${err.message}`);
+        }
+      };
+
+      const handleTrocarFamiliaAtiva = async (novaFamiliaId) => {
+        if (!novaFamiliaId || novaFamiliaId === familiaAtiva?.id) return;
+        triggerHaptic('medium');
+        try {
+          if (supabase) {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user?.id) {
+              const { error: setErr } = await supabase
+                .from('user_settings')
+                .upsert({
+                  user_id: user.id,
+                  familia_id: novaFamiliaId,
+                  updated_at: new Date().toISOString()
+                }, { onConflict: 'user_id' });
+              if (setErr) console.warn("Aviso ao salvar família ativa em user_settings:", setErr.message);
+            }
+          }
+          await carregarDados();
+          triggerHaptic('success');
+          showToast("Espaço familiar alternado com sucesso! 🏠");
+        } catch (err) {
+          console.error("Erro ao alternar família ativa:", err);
+          showToast(`Erro ao alternar família: ${err.message}`);
         }
       };
 
@@ -1091,11 +1204,6 @@
           showToast("Informe o e-mail e a senha.");
           return;
         }
-        if (loginAttempts >= 5 && Date.now() < lockUntil) {
-          const restante = Math.ceil((lockUntil - Date.now()) / 1000);
-          showToast(`Muitas tentativas incorretas. Aguarde ${restante}s.`);
-          return;
-        }
 
         setAuthLoading(true);
 
@@ -1137,24 +1245,18 @@
             return;
           }
 
-          // Checa se o usuário autenticado possui privilégio de Super Admin
+          // Checa se o usuário autenticado possui privilégio de Super Admin exclusivamente via RPC no servidor
           let isSuperAdminUser = false;
           try {
-            const { data: isSuperAdminResp } = await supabase.rpc('is_super_admin');
+            const { data: isSuperAdminResp, error } = await supabase.rpc('is_super_admin');
+            if (error) throw error;
             if (isSuperAdminResp === true) isSuperAdminUser = true;
           } catch (e) {
-            console.warn("RPC is_super_admin check:", e);
+            console.warn('Falha ao verificar super admin, negando por padrão:', e);
+            isSuperAdminUser = false;
           }
 
-          if (isSuperAdminUser || (user?.email && user.email.toLowerCase().startsWith('admin@'))) {
-            setMfaRequired(true);
-            setTempAuthUser(user);
-            setAuthLoading(false);
-            showToast("🔐 Autenticação Multifator (MFA) exigida para Super Admin.");
-            return;
-          }
-
-          setLoginAttempts(0);
+          setIsSuperAdmin(isSuperAdminUser);
           setIsAuthenticated(true);
           
           if (user) {
@@ -1174,10 +1276,8 @@
           await carregarDados();
         } catch (err) {
           console.error("Erro no login:", err);
-          const novasTentativas = loginAttempts + 1;
-          setLoginAttempts(novasTentativas);
-          if (novasTentativas >= 5) {
-            setLockUntil(Date.now() + 60000);
+          if (window.Sentry && typeof window.Sentry.captureException === 'function') {
+            window.Sentry.captureException(err, { extra: { email: email.trim(), action: 'handleLogin' } });
           }
           
           let msg = err.message || 'Credenciais inválidas';
@@ -1221,6 +1321,8 @@
           let msg = err.message || 'Falha ao solicitar redefinição';
           if (msg.includes('rate limit') || msg.includes('rate_limit')) {
             msg = 'Limite de envio de e-mails do Supabase gratuito atingido (máx 3/hora). Aguarde alguns minutos ou configure SMTP próprio.';
+          } else if (msg.includes('Error sending recovery email') || msg.includes('500') || msg.includes('Internal Server Error')) {
+            msg = 'Erro ao enviar e-mail pelo Supabase. Verifique se o SMTP está configurado e se a URL da Vercel está cadastrada em Authentication > URL Configuration.';
           }
           showToast(`Atenção: ${msg}`);
         } finally {
@@ -1267,6 +1369,10 @@
           setIsAuthenticated(true);
           await carregarDados();
         } catch (err) {
+          console.error("Erro ao redefinir senha:", err);
+          if (window.Sentry && typeof window.Sentry.captureException === 'function') {
+            window.Sentry.captureException(err, { extra: { action: 'handleSalvarNovaSenha' } });
+          }
           showToast(`Erro ao redefinir senha: ${err.message}`);
         } finally {
           setAuthLoading(false);
@@ -1340,6 +1446,9 @@
           }
         } catch (err) {
           console.error("Erro no cadastro:", err);
+          if (window.Sentry && typeof window.Sentry.captureException === 'function') {
+            window.Sentry.captureException(err, { extra: { email: email.trim(), action: 'handleCadastro' } });
+          }
           let msg = err.message || 'Falha ao registrar conta';
           if (msg.includes('already registered') || msg.includes('already exists')) {
             msg = 'Este e-mail já possui cadastro. Acesse a aba Entrar.';
@@ -1352,26 +1461,7 @@
         }
       };
 
-      const handleVerifyMfa = async (code) => {
-        if (!code || code.trim().length < 6) {
-          showToast("Informe o código de 6 dígitos.");
-          return;
-        }
 
-        setMfaLoading(true);
-        setTimeout(async () => {
-          setMfaLoading(false);
-          setMfaRequired(false);
-          setIsAuthenticated(true);
-          setIsSuperAdmin(true);
-          setActiveTab('superadmin');
-          showToast("👑 Acesso de Super Admin autenticado com MFA!");
-          if (supabase) {
-            await carregarDados();
-            await fetchAdminData();
-          }
-        }, 500);
-      };
 
       const handleUploadAvatar = async (file) => {
         if (!file) return;
@@ -1419,11 +1509,12 @@
           setUserProfile(updatedProfile);
           localStorage.setItem('fin_user_profile', JSON.stringify(updatedProfile));
 
-          await supabase.from('usuarios').upsert({
+          const { error: usrPicErr } = await supabase.from('usuarios').upsert({
             id: user.id,
             avatar_url: publicUrl,
             updated_at: new Date().toISOString()
           });
+          if (usrPicErr) throw usrPicErr;
 
           triggerHaptic('success');
           showToast("Foto de perfil enviada com sucesso! 📷");
@@ -1478,13 +1569,15 @@
             if (nomeFinal) {
               setOwnerName(nomeFinal);
               if (familiaAtiva?.id) {
-                await supabase.from('membros_familia')
+                const { error: membErr } = await supabase.from('membros_familia')
                   .update({ nome_exibicao: nomeFinal })
                   .match({ familia_id: familiaAtiva.id, user_id: currentUserId });
+                if (membErr) console.warn("Aviso ao atualizar nome do membro:", membErr.message);
               }
-              await supabase.from('user_settings')
+              const { error: setErr } = await supabase.from('user_settings')
                 .update({ owner_name: nomeFinal })
                 .eq('user_id', currentUserId);
+              if (setErr) console.warn("Aviso ao atualizar user_settings:", setErr.message);
             }
           }
 
@@ -1505,6 +1598,40 @@
           showToast(`Erro ao salvar: ${err.message}`);
         } finally {
           setProfileSaving(false);
+        }
+      };
+
+      const handleExcluirConta = async () => {
+        if (exclusaoContaInput.trim().toUpperCase() !== 'EXCLUIR') {
+          showToast("Digite 'EXCLUIR' em maiúsculas para confirmar.");
+          return;
+        }
+
+        const confirmMsg = "TEM CERTEZA ABSOLUTA?\n\nEsta ação é irreversível e excluirá seus dados cadastrais e financeiros de forma definitiva conforme a LGPD.\n\nDeseja prosseguir com a exclusão?";
+        if (!window.confirm(confirmMsg)) return;
+
+        setExcluindoConta(true);
+        triggerHaptic('heavy');
+        try {
+          if (supabase) {
+            const { data, error } = await supabase.rpc('excluir_minha_conta');
+            if (error) throw error;
+            showToast(data?.message || "Conta e dados pessoais excluídos com sucesso.");
+          }
+
+          // NOTA DE SEGURANÇA & ARQUITETURA LGPD:
+          // A função RPC excluir_minha_conta removeu com segurança todos os dados da base pública (usuarios, membros_familia, user_settings, contas e lançamentos solo).
+          // A remoção final do usuário na tabela de autenticação auth.users do Supabase requer privilégio de service_role via Supabase Edge Function ou webhook de backend, pois não deve ser exposta diretamente no navegador do cliente.
+
+          limparMemoriaECacheSeguro();
+          if (supabase) {
+            await supabase.auth.signOut();
+          }
+          window.location.reload();
+        } catch (err) {
+          console.error("Erro ao excluir conta:", err);
+          showToast(`Erro ao excluir conta: ${err.message}`);
+          setExcluindoConta(false);
         }
       };
 
@@ -1548,6 +1675,8 @@
         setMembrosFamilia([]);
         setFamiliaAtiva(null);
         setAdminMetrics(null);
+        setOwnerName('');
+        setPartnerName('');
         setUserProfile({ nome: '', profissao: '', telefone: '', endereco: '', avatar_url: '' });
 
         // 2. Itera sobre o localStorage e sessionStorage purgando todos os dados de usuário/família
@@ -1618,18 +1747,23 @@
                   setOwnerName(user.user_metadata.full_name);
                 }
 
-                // Checa privilégio Super Admin
+                // Checa privilégio Super Admin exclusivamente via RPC no servidor
                 try {
-                  const { data: isAdm } = await supabase.rpc('is_super_admin');
+                  const { data: isAdm, error } = await supabase.rpc('is_super_admin');
+                  if (error) throw error;
                   setIsSuperAdmin(Boolean(isAdm));
-                } catch(e) {
-                  setIsSuperAdmin(Boolean(user.app_metadata?.is_super_admin));
+                } catch (e) {
+                  console.warn('Falha ao verificar super admin, negando por padrão:', e);
+                  setIsSuperAdmin(false);
                 }
 
                 await carregarDados();
               }
             } catch (err) {
               console.error("Erro na inicialização segura com getUser():", err);
+              if (window.Sentry && typeof window.Sentry.captureException === 'function') {
+                window.Sentry.captureException(err, { extra: { action: 'inicializarSessaoSegura' } });
+              }
               limparMemoriaECacheSeguro();
             } finally {
               setAuthLoading(false);
@@ -1642,7 +1776,13 @@
           const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
             console.log(`[AUTH ENGINE] Evento Supabase: ${event}`);
 
-            if (event === 'SIGNED_IN') {
+            if (event === 'INITIAL_SESSION') {
+              console.log("[AUTH ENGINE] Evento INITIAL_SESSION processado com sucesso.");
+              if (session?.user) {
+                setAuthUser(session.user);
+                setIsAuthenticated(true);
+              }
+            } else if (event === 'SIGNED_IN') {
               if (session?.user) {
                 setAuthUser(session.user);
                 setIsAuthenticated(true);
@@ -1679,6 +1819,100 @@
           fetchAdminData();
         }
       }, [activeTab, supabase]);
+
+      // Carregamento sob demanda automático ao selecionar períodos com mais de 6 meses no passado
+      useEffect(() => {
+        if (!supabase) return;
+        const hoje = new Date();
+        const dataSel = new Date(selectedYear, selectedMonth - 1, 1);
+        const diffMeses = (hoje.getFullYear() - dataSel.getFullYear()) * 12 + (hoje.getMonth() - dataSel.getMonth());
+        if (diffMeses > 5 && !historicoCompletoCarregado && !carregandoHistorico) {
+          carregarHistoricoCompleto(false);
+        }
+      }, [selectedYear, selectedMonth, historicoCompletoCarregado, carregandoHistorico, supabase]);
+
+      const activeFamId = familiaAtiva?.id;
+
+      // Assinatura Supabase Realtime em Tempo Real Escopada por Família
+      useEffect(() => {
+        if (!supabase || !activeFamId) return;
+
+        console.log(`[REALTIME] Conectando ao canal em tempo real para a família: ${activeFamId}`);
+        const channel = supabase.channel(`realtime-familia-${activeFamId}`)
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'transactions',
+              filter: `familia_id=eq.${activeFamId}`
+            },
+            (payload) => {
+              console.log('[REALTIME] Evento em transactions:', payload);
+              carregarDados();
+            }
+          )
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'accounts',
+              filter: `familia_id=eq.${activeFamId}`
+            },
+            (payload) => {
+              console.log('[REALTIME] Evento em accounts:', payload);
+              carregarDados();
+            }
+          )
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'budgets',
+              filter: `familia_id=eq.${activeFamId}`
+            },
+            (payload) => {
+              console.log('[REALTIME] Evento em budgets:', payload);
+              carregarDados();
+            }
+          )
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'recurring_patterns',
+              filter: `familia_id=eq.${activeFamId}`
+            },
+            (payload) => {
+              console.log('[REALTIME] Evento em recurring_patterns:', payload);
+              carregarDados();
+            }
+          )
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'investment_valuations',
+              filter: `familia_id=eq.${activeFamId}`
+            },
+            (payload) => {
+              console.log('[REALTIME] Evento em investment_valuations:', payload);
+              carregarDados();
+            }
+          )
+          .subscribe((status) => {
+            console.log(`[REALTIME] Status da assinatura (${activeFamId}):`, status);
+          });
+
+        return () => {
+          console.log(`[REALTIME] Removendo canal da família: ${activeFamId}`);
+          supabase.removeChannel(channel);
+        };
+      }, [activeFamId, supabase]);
 
       // Saldos por Conta (Regime de Caixa Realizado - Apenas Lançamentos Liquidados / Efetivados)
       const accountBalances = useMemo(() => {
@@ -1754,17 +1988,24 @@
           localStorage.setItem('fin_acc_v3', JSON.stringify(upd));
         } else {
           try {
-            await supabase.from('accounts').upsert(obj);
-            await supabase.from('user_settings').upsert({
+            const { error: accErr } = await supabase.from('accounts').upsert(obj);
+            if (accErr) throw accErr;
+
+            const { error: setErr } = await supabase.from('user_settings').upsert({
               owner_name: ownerName,
               partner_name: partnerName,
               onboarding_completed: true,
               onboarding_decision: 'custom',
               updated_at: new Date().toISOString()
             });
+            if (setErr) console.warn("Aviso ao salvar settings:", setErr.message);
+
             await carregarDados();
           } catch (err) {
             console.error("Erro ao salvar conta no Supabase:", err);
+            triggerHaptic('error');
+            showToast(`Erro ao gravar categoria no banco: ${err.message}`);
+            return;
           }
         }
 
@@ -1780,8 +2021,19 @@
         if (!supabase) {
           localStorage.setItem('fin_acc_v3', JSON.stringify(upd));
         } else {
-          await supabase.from('accounts').update({ is_active: false }).eq('id', acc.id);
-          await carregarDados();
+          try {
+            const { error: inatErr } = await supabase.from('accounts').update({ is_active: false }).eq('id', acc.id);
+            if (inatErr) {
+              console.error("Erro ao inativar conta:", inatErr);
+              showToast(`Erro ao inativar categoria: ${inatErr.message}`);
+              return;
+            }
+            await carregarDados();
+          } catch (err) {
+            console.error("Erro ao inativar conta:", err);
+            showToast(`Erro ao inativar categoria: ${err.message}`);
+            return;
+          }
         }
 
         triggerHaptic('warning');
@@ -1796,8 +2048,19 @@
         if (!supabase) {
           localStorage.setItem('fin_acc_v3', JSON.stringify(upd));
         } else {
-          await supabase.from('accounts').update({ is_active: true }).eq('id', acc.id);
-          await carregarDados();
+          try {
+            const { error: reatErr } = await supabase.from('accounts').update({ is_active: true }).eq('id', acc.id);
+            if (reatErr) {
+              console.error("Erro ao reativar conta:", reatErr);
+              showToast(`Erro ao reativar categoria: ${reatErr.message}`);
+              return;
+            }
+            await carregarDados();
+          } catch (err) {
+            console.error("Erro ao reativar conta:", err);
+            showToast(`Erro ao reativar categoria: ${err.message}`);
+            return;
+          }
         }
 
         triggerHaptic('success');
@@ -1824,15 +2087,34 @@
           if (!supabase) {
             localStorage.setItem('fin_acc_v3', JSON.stringify(upd));
           } else {
-            await supabase.from('accounts').delete().eq('id', accId);
-            await carregarDados();
+            try {
+              const { error: delAccErr } = await supabase.from('accounts').delete().eq('id', accId);
+              if (delAccErr) {
+                console.error("Erro ao excluir conta:", delAccErr);
+                showToast(`Erro ao excluir categoria: ${delAccErr.message}`);
+                return;
+              }
+              await carregarDados();
+            } catch (err) {
+              console.error("Erro ao excluir conta:", err);
+              showToast(`Erro ao excluir categoria: ${err.message}`);
+              return;
+            }
           }
 
           triggerHaptic('warning');
           showToast(`Categoria "${deleteModal.title}" excluída.`, () => {
             setAccounts(old);
             if (!supabase) localStorage.setItem('fin_acc_v3', JSON.stringify(old));
-            else supabase.from('accounts').insert(old.find(a => a.id === accId));
+            else {
+              const accRestaurar = old.find(a => a.id === accId);
+              if (accRestaurar) {
+                supabase.from('accounts').insert(accRestaurar).then(({ error }) => {
+                  if (error) console.error("Erro no rollback da conta:", error);
+                  else carregarDados();
+                });
+              }
+            }
           });
         } else if (deleteModal.type === 'transaction') {
           const transId = deleteModal.id;
@@ -1847,8 +2129,19 @@
             localStorage.setItem('fin_trans_v3', JSON.stringify(updTrans));
             localStorage.setItem('fin_post_v3', JSON.stringify(updPost));
           } else {
-            await supabase.from('transactions').delete().eq('id', transId);
-            await carregarDados();
+            try {
+              const { error: delTxErr } = await supabase.from('transactions').delete().eq('id', transId);
+              if (delTxErr) {
+                console.error("Erro ao excluir transação:", delTxErr);
+                showToast(`Erro ao excluir lançamento: ${delTxErr.message}`);
+                return;
+              }
+              await carregarDados();
+            } catch (err) {
+              console.error("Erro ao excluir transação:", err);
+              showToast(`Erro ao excluir lançamento: ${err.message}`);
+              return;
+            }
           }
 
           triggerHaptic('warning');
@@ -1920,9 +2213,13 @@
 
           if (supabase) {
             try {
-              await supabase.from('budgets').upsert(newBudgets, { onConflict: 'account_id,month,year' });
+              const { error: budgErr } = await supabase.from('budgets').upsert(newBudgets, { onConflict: 'account_id,month,year' });
+              if (budgErr) throw budgErr;
+              await carregarDados();
             } catch (err) {
               console.error("Erro ao salvar orçamento em todos os meses no Supabase:", err);
+              showToast(`Erro ao gravar meta no banco: ${err.message}`);
+              return;
             }
           }
           triggerHaptic('success');
@@ -1948,9 +2245,13 @@
 
           if (supabase) {
             try {
-              await supabase.from('budgets').upsert(budgetObj, { onConflict: 'account_id,month,year' });
+              const { error: budgErr } = await supabase.from('budgets').upsert(budgetObj, { onConflict: 'account_id,month,year' });
+              if (budgErr) throw budgErr;
+              await carregarDados();
             } catch (err) {
               console.error("Erro ao salvar orçamento mensal no Supabase:", err);
+              showToast(`Erro ao gravar meta no banco: ${err.message}`);
+              return;
             }
           }
           triggerHaptic('success');
@@ -1965,66 +2266,8 @@
         const transMap = new Map(transDoMes.map(t => [t.id, t]));
         const postingsDoMes = postings.filter(p => transMap.has(p.transaction_id));
 
-        const getZbbWeight = (t) => {
-          if (!t) return 1.0;
-          if (filtroTitularZbb === 'ambos') return 1.0;
-          const isEd = isOwnerInvest(t, null);
-          const isYas = isPartnerInvest(t, null);
-          const own = t.ownership_type;
-          const tit = (t.titular || '').toLowerCase();
-
-          if (filtroTitularZbb === 'owner') {
-            if (isEd && !isYas) return 1.0;
-            if (isYas && !isEd) return 0.0;
-            if (tit === 'edvan' || tit === (ownerName || 'edvan').toLowerCase()) return 1.0;
-            if (tit === 'yasmin' || tit === (partnerName || 'yasmin').toLowerCase()) return 0.0;
-            if (own === 'owner_only') return 1.0;
-            if (own === 'partner_only') return 0.0;
-            if (own === 'shared_50_50' || t.titular === 'Ambos') return 0.5;
-            return 1.0;
-          }
-
-          if (filtroTitularZbb === 'partner') {
-            if (isYas && !isEd) return 1.0;
-            if (isEd && !isYas) return 0.0;
-            if (tit === 'yasmin' || tit === (partnerName || 'yasmin').toLowerCase()) return 1.0;
-            if (tit === 'edvan' || tit === (ownerName || 'edvan').toLowerCase()) return 0.0;
-            if (own === 'partner_only') return 1.0;
-            if (own === 'owner_only') return 0.0;
-            if (own === 'shared_50_50' || t.titular === 'Ambos') return 0.5;
-            return 0.0;
-          }
-
-          return 1.0;
-        };
-
-        const getZbbAccWeight = (a) => {
-          if (!a) return 1.0;
-          if (filtroTitularZbb === 'ambos') return 1.0;
-          const isEd = isOwnerInvest(null, a);
-          const isYas = isPartnerInvest(null, a);
-          const tit = (a.titular || '').toLowerCase();
-
-          if (filtroTitularZbb === 'owner') {
-            if (isEd && !isYas) return 1.0;
-            if (isYas && !isEd) return 0.0;
-            if (tit === 'edvan' || tit === (ownerName || 'edvan').toLowerCase()) return 1.0;
-            if (tit === 'yasmin' || tit === (partnerName || 'yasmin').toLowerCase()) return 0.0;
-            if (tit === 'ambos') return 0.5;
-            return 1.0;
-          }
-
-          if (filtroTitularZbb === 'partner') {
-            if (isYas && !isEd) return 1.0;
-            if (isEd && !isYas) return 0.0;
-            if (tit === 'yasmin' || tit === (partnerName || 'yasmin').toLowerCase()) return 1.0;
-            if (tit === 'edvan' || tit === (ownerName || 'edvan').toLowerCase()) return 0.0;
-            if (tit === 'ambos') return 0.5;
-            return 0.0;
-          }
-
-          return 1.0;
-        };
+        const getZbbWeight = (t) => getTitularWeight(t, null, filtroTitularZbb);
+        const getZbbAccWeight = (a) => getTitularWeight(null, a, filtroTitularZbb);
 
         let rendaTotal = 0;
         let rendaRecebida = 0;
@@ -2144,16 +2387,22 @@
         return { total, comOrcamento, semOrcamento };
       }, [zbbSummary, zbbAbaAtiva]);
 
-      // MÓDULO 11: CÁLCULO DE RATEIO E ACERTO DE CASAL (SPLIT FINANCE - ESTRITAMENTE 50%)
+      // MÓDULO 11: CÁLCULO DE RATEIO E ACERTO DE CASAL (SPLIT FINANCE - DESPESAS COMPARTILHADAS 50%)
       const acertoDoMes = useMemo(() => {
         const ymStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+        const pNameLower = (partnerName || '').trim().toLowerCase();
         
-        // 1. Filtrar APENAS despesas que tenham rateio estritamente 50/50 de casal (shared_50_50)
+        // 1. Filtrar despesas do mês (pendentes E pagas) que são estritamente COMPARTILHADAS (50% / Casal)
         const transDoMes = transactions.filter(t => {
           if (!t.date || !t.date.startsWith(ymStr)) return false;
-          if (t.ownership_type !== 'shared_50_50') return false;
+          // (a) Exclui apenas 'cancelled' — pendente ('a pagar') e 'completed' (pago) entram ambos no acerto
+          if (t.status === 'cancelled') return false;
 
-          // Garantir que é estritamente uma DESPESA (EXPENSE) e NUNCA uma Receita
+          // (b) Inclui estritamente despesas com rateio dividido 50% / 50% (Casal)
+          const isShared = t.ownership_type === 'shared_50_50' || (!t.ownership_type && t.titular && t.titular.toLowerCase() === 'ambos');
+          if (!isShared) return false;
+
+          // (c) Garantir que é estritamente uma DESPESA (EXPENSE) e NUNCA uma Receita
           const transPost = postings.filter(p => p.transaction_id === t.id);
           const isExpense = transPost.some(p => {
             const acc = accounts.find(a => a.id === p.account_id);
@@ -2164,30 +2413,43 @@
 
         let totalGastoConjunto = 0;
         let dividaParceiro = 0;
+        const itens = [];
 
-        const itens = transDoMes.map(t => {
+        transDoMes.forEach(t => {
           const transPost = postings.filter(p => p.transaction_id === t.id);
           const totalVal = transPost.filter(p => p.amount > 0).reduce((s, p) => s + p.amount, 0);
+          if (totalVal <= 0) return;
+
           const debPosting = transPost.find(p => p.amount > 0);
           const catAcc = accounts.find(a => a.id === debPosting?.account_id);
 
+          const tTitular = (t.titular || '').trim().toLowerCase();
+          const paidByPartner = Boolean(pNameLower && (tTitular === pNameLower || tTitular === 'parceiro' || tTitular === 'parceira'));
+
           totalGastoConjunto += totalVal;
 
-          // Estritamente 50%
-          const valorDevido = totalVal * 0.5;
+          let valorDevido = 0; // Positivo = Parceiro deve ao Titular; Negativo = Titular deve ao Parceiro
+          if (paidByPartner) {
+            valorDevido = -(totalVal * 0.5); // Parceiro pagou despesa conjunta -> Titular deve 50%
+          } else {
+            valorDevido = totalVal * 0.5;   // Titular pagou despesa conjunta -> Parceiro deve 50%
+          }
+
           dividaParceiro += valorDevido;
 
-          return {
+          itens.push({
             transaction: t,
             categoryName: catAcc ? catAcc.name : 'Despesa',
             categoryColor: catAcc ? catAcc.color : '#4f46e5',
             total: totalVal,
             valorDevido,
-            ownership_type: t.ownership_type
-          };
+            ownership_type: 'shared_50_50',
+            paidByPartner,
+            status: t.status || 'completed'
+          });
         });
 
-        const parteTitular = totalGastoConjunto - dividaParceiro;
+        const parteTitular = totalGastoConjunto - Math.max(0, dividaParceiro);
 
         return {
           totalGastoConjunto,
@@ -2195,7 +2457,7 @@
           dividaParceiro,
           itens
         };
-      }, [transactions, postings, accounts, selectedYear, selectedMonth]);
+      }, [transactions, postings, accounts, selectedYear, selectedMonth, ownerName, partnerName]);
 
       // Projeções RFC 5545 com Reconciliação Inteligente de Transações Já Realizadas
       const virtualOccurrences = useMemo(() => {
@@ -2332,12 +2594,12 @@
         const ymStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
         const transBase = transactions.filter(t => filtroPeriodoDiario === 'todos' || (t.date && t.date.startsWith(ymStr)));
 
-        let countEdvan = 0, countYasmin = 0, countAmbos = 0;
+        let countOwner = 0, countPartner = 0, countAmbos = 0;
         let countRecebido = 0, countPago = 0, countAReceber = 0, countAPagar = 0;
 
         transBase.forEach(t => {
-          if (t.titular === ownerName) countEdvan++;
-          else if (t.titular === partnerName) countYasmin++;
+          if (t.titular === ownerName) countOwner++;
+          else if (t.titular === partnerName) countPartner++;
           else countAmbos++;
 
           const transPost = postings.filter(p => p.transaction_id === t.id);
@@ -2356,8 +2618,8 @@
 
         return {
           total: transBase.length,
-          countEdvan,
-          countYasmin,
+          countOwner,
+          countPartner,
           countAmbos,
           countRecebido,
           countPago,
@@ -2404,10 +2666,17 @@
 
         if (supabase) {
           try {
-            await supabase.from('transactions').update({ status: newStatus }).eq('id', transId);
+            const { error: updStatErr } = await supabase.from('transactions').update({ status: newStatus }).eq('id', transId);
+            if (updStatErr) {
+              console.error("Erro ao atualizar status:", updStatErr);
+              showToast(`Erro ao atualizar status: ${updStatErr.message}`);
+              return;
+            }
             await carregarDados();
           } catch (e) {
             console.error("Erro ao atualizar status:", e);
+            showToast(`Erro ao atualizar status: ${e.message}`);
+            return;
           }
         }
         triggerHaptic('success');
@@ -2499,9 +2768,31 @@
               p_status: status
             });
             if (rpcErr) {
-              await supabase.from('transactions').update({ date, description, titular, status, ownership_type: ownershipType }).eq('id', transId);
-              await supabase.from('postings').delete().eq('transaction_id', transId);
-              await supabase.from('postings').insert(newPostingsList);
+              const { error: updTxErr } = await supabase
+                .from('transactions')
+                .update({ date, description, titular, status, ownership_type: ownershipType })
+                .eq('id', transId);
+              if (updTxErr) throw updTxErr;
+
+              const { error: delPostErr } = await supabase
+                .from('postings')
+                .delete()
+                .eq('transaction_id', transId);
+              if (delPostErr) throw delPostErr;
+
+              const { error: insPostErr } = await supabase
+                .from('postings')
+                .insert(newPostingsList);
+              if (insPostErr) throw insPostErr;
+            } else {
+              // Garantia extra: força a persistência de titular/ownership_type/status via update direto,
+              // pois a RPC pode estar desatualizada no banco e ignorar silenciosamente esses campos
+              // (ex.: editar uma despesa para "Dividido 50%" parecia salvar, mas o rateio não mudava).
+              const { error: syncMetaErr } = await supabase
+                .from('transactions')
+                .update({ date, description, titular, status, ownership_type: ownershipType })
+                .eq('id', transId);
+              if (syncMetaErr) throw syncMetaErr;
             }
           } else {
             const { data: rpcTransId, error: rpcErr } = await supabase.rpc('create_transaction_with_postings', {
@@ -2515,8 +2806,15 @@
               p_status: status
             });
             if (rpcErr) {
-              await supabase.from('transactions').insert([transObj]);
-              await supabase.from('postings').insert(newPostingsList);
+              const { error: insTxErr } = await supabase
+                .from('transactions')
+                .insert([{ ...transObj, familia_id: familiaAtiva?.id }]);
+              if (insTxErr) throw insTxErr;
+
+              const { error: insPostErr } = await supabase
+                .from('postings')
+                .insert(newPostingsList);
+              if (insPostErr) throw insPostErr;
             }
           }
 
@@ -2527,6 +2825,12 @@
           showToast(recurrenceConfig?.enabled ? "Lançamento gravado e série programada!" : "Lançamento salvo no PostgreSQL!");
           return true;
         } catch (err) {
+          console.error("Erro ao salvar transação:", err);
+          if (window.Sentry && typeof window.Sentry.captureException === 'function') {
+            window.Sentry.captureException(err, {
+              extra: { date, description, ownershipType, titular, status, postingsCount: rawPostings?.length, isEditing }
+            });
+          }
           triggerHaptic('error');
           showToast(`Falha contábil: ${err.message}`);
           return false;
@@ -2575,10 +2879,17 @@
         localStorage.setItem('fin_rec_v3', JSON.stringify(upd));
         if (supabase) {
           try {
-            await supabase.from('recurring_patterns').delete().eq('id', recId);
+            const { error: delRecErr } = await supabase.from('recurring_patterns').delete().eq('id', recId);
+            if (delRecErr) {
+              console.error("Erro ao deletar recorrência:", delRecErr);
+              showToast(`Erro ao cancelar série no banco: ${delRecErr.message}`);
+              return;
+            }
             await carregarDados();
           } catch (err) {
             console.error("Erro ao deletar recorrência:", err);
+            showToast(`Erro ao cancelar série no banco: ${err.message}`);
+            return;
           }
         }
         triggerHaptic('warning');
@@ -2746,6 +3057,65 @@
         }
       };
 
+      // Exclusão Dinâmica de Vencimento/Previsão (Apenas Esta Ocorrência ou Toda a Série)
+      const executarExclusaoVencimento = async (item, modo) => {
+        if (!item) return;
+        try {
+          if (modo === 'todas') {
+            // Exclui toda a série recorrente
+            const patId = item.is_virtual ? item.occurrence?.pattern_id : item.transaction?.recurrence_id;
+            if (patId) {
+              await desativarRecorrencia(patId);
+            }
+            if (!item.is_virtual && item.transaction?.id) {
+              if (supabase) {
+                await supabase.from('transactions').delete().eq('id', item.transaction.id);
+              } else {
+                setTransactions(prev => prev.filter(t => t.id !== item.transaction.id));
+                setPostings(prev => prev.filter(p => p.transaction_id !== item.transaction.id));
+              }
+            }
+            showToast("Série recorrente excluída com sucesso! 🗑️");
+          } else {
+            // Exclui apenas esta ocorrência do mês
+            if (item.is_virtual) {
+              const occ = item.occurrence;
+              const zeroPostings = (occ.template_postings || []).map(p => ({
+                account_id: p.account_id,
+                amount: 0
+              }));
+              await salvarTransacao(
+                occ.date,
+                occ.description,
+                zeroPostings,
+                occ.ownership_type || 'owner_only',
+                null,
+                occ.pattern_id,
+                occ.date,
+                null,
+                occ.titular || 'Ambos',
+                'cancelled'
+              );
+              showToast("Vencimento deste mês cancelado/excluído!");
+            } else {
+              // Transação avulsa existente
+              if (supabase) {
+                await supabase.from('transactions').delete().eq('id', item.transaction.id);
+              } else {
+                setTransactions(prev => prev.filter(t => t.id !== item.transaction.id));
+                setPostings(prev => prev.filter(p => p.transaction_id !== item.transaction.id));
+              }
+              showToast("Lançamento pendente excluído com sucesso!");
+            }
+          }
+          setModalExcluirVencimento({ show: false, item: null, modo: 'apenas_esta' });
+          await carregarDados();
+        } catch (err) {
+          console.error("Erro ao excluir vencimento:", err);
+          showToast(`Erro ao excluir: ${err.message}`);
+        }
+      };
+
       const salvarReavaliacaoInvestimento = async ({ id, accountId, date, previousAmount, newAmount, notes, titular, criarLancamentoContabil }) => {
         const prevVal = Number(previousAmount) || 0;
         const newVal = Number(newAmount) || 0;
@@ -2813,15 +3183,26 @@
           }
 
           if (rawPostings.length === 2) {
-            await salvarTransacao(date, desc, rawPostings, 'owner_only', null, null, null, null, titular, 'completed');
+            // Ownership derivado do titular efetivo da reavaliação (não pode ser fixo em 'owner_only',
+            // senão toda reavaliação de uma conta da/do parceira(o) é contabilizada como se fosse do titular).
+            const efetivoTitular = (valuationObj.titular || '').trim().toLowerCase();
+            const partnerLower = (partnerName || '').trim().toLowerCase();
+            const inferredOwnership = efetivoTitular === 'ambos'
+              ? 'shared_50_50'
+              : (partnerLower && efetivoTitular === partnerLower) ? 'partner_only' : 'owner_only';
+            await salvarTransacao(date, desc, rawPostings, inferredOwnership, null, null, null, null, titular, 'completed');
           }
         }
 
         if (supabase) {
           try {
-            await supabase.from('investment_valuations').upsert(valuationObj);
+            const { error: valErr } = await supabase.from('investment_valuations').upsert(valuationObj);
+            if (valErr) throw valErr;
+            await carregarDados();
           } catch (e) {
             console.error("Erro ao salvar reavaliação no Supabase:", e);
+            showToast(`Erro ao gravar reavaliação no banco: ${e.message}`);
+            return;
           }
         }
 
@@ -2845,9 +3226,13 @@
         localStorage.setItem('fin_invest_val_v3', JSON.stringify(upd));
         if (supabase) {
           try {
-            await supabase.from('investment_valuations').delete().eq('id', id);
+            const { error: delValErr } = await supabase.from('investment_valuations').delete().eq('id', id);
+            if (delValErr) throw delValErr;
+            await carregarDados();
           } catch (e) {
             console.error("Erro ao deletar valuation:", e);
+            showToast(`Erro ao excluir reavaliação no banco: ${e.message}`);
+            return;
           }
         }
         triggerHaptic('warning');
@@ -2861,8 +3246,8 @@
 
       // Cálculo de Saldo Real por Titular para cada Conta de Investimento
       const getInvestimentoTitularBreakdown = (accId) => {
-        let edvanTotal = 0;
-        let yasminTotal = 0;
+        let ownerTotal = 0;
+        let partnerTotal = 0;
         let ambosTotal = 0;
         const targetAcc = accounts.find(a => a.id === accId);
 
@@ -2872,22 +3257,17 @@
           const amt = Math.abs(Number(p.amount)) || 0;
           if (amt === 0) return;
 
-          const isEd = isOwnerInvest(trans, targetAcc);
-          const isYas = isPartnerInvest(trans, targetAcc);
+          const isOwner = isOwnerInvest(trans, targetAcc);
+          const isPartner = isPartnerInvest(trans, targetAcc);
 
-          if (isEd && !isYas) {
-            edvanTotal += amt;
-          } else if (isYas && !isEd) {
-            yasminTotal += amt;
+          if (isOwner && !isPartner) {
+            ownerTotal += amt;
+          } else if (isPartner && !isOwner) {
+            partnerTotal += amt;
+          } else if (isOwner && isPartner) {
+            ambosTotal += amt;
           } else {
-            const desc = (trans?.description || '').toLowerCase();
-            if (ownerName && desc.includes(ownerName.toLowerCase())) {
-              edvanTotal += amt;
-            } else if (partnerName && desc.includes(partnerName.toLowerCase())) {
-              yasminTotal += amt;
-            } else {
-              ambosTotal += amt;
-            }
+            ownerTotal += amt;
           }
         });
 
@@ -2897,18 +3277,18 @@
           const isAccYas = isPartnerInvest(null, targetAcc);
           const accBal = Math.abs(accountBalances[accId] || 0);
 
-          if (isAccEd && !isAccYas && edvanTotal === 0) {
-            edvanTotal = accBal;
-          } else if (isAccYas && !isAccEd && yasminTotal === 0) {
-            yasminTotal = accBal;
+          if (isAccEd && !isAccYas && ownerTotal === 0) {
+            ownerTotal = accBal;
+          } else if (isAccYas && !isAccEd && partnerTotal === 0) {
+            partnerTotal = accBal;
           }
         }
 
-        const totalGeral = edvanTotal + yasminTotal + ambosTotal;
+        const totalGeral = ownerTotal + partnerTotal + ambosTotal;
 
         return {
-          edvan: edvanTotal,
-          yasmin: yasminTotal,
+          owner: ownerTotal,
+          partner: partnerTotal,
           ambos: ambosTotal,
           geral: totalGeral || Math.abs(accountBalances[accId] || 0)
         };
@@ -2917,8 +3297,8 @@
       // Saldo do Investimento Ponderado pela Visão Selecionada
       const getInvestimentoBalance = (acc) => {
         const breakdown = getInvestimentoTitularBreakdown(acc.id);
-        if (filtroTitularInvestimento === 'owner') return breakdown.edvan;
-        if (filtroTitularInvestimento === 'partner') return breakdown.yasmin;
+        if (filtroTitularInvestimento === 'owner') return breakdown.owner;
+        if (filtroTitularInvestimento === 'partner') return breakdown.partner;
         return breakdown.geral;
       };
 
@@ -2928,10 +3308,10 @@
           if (filtroTitularInvestimento === 'geral') return true;
           const breakdown = getInvestimentoTitularBreakdown(a.id);
           if (filtroTitularInvestimento === 'owner') {
-            return breakdown.edvan > 0 || isOwnerInvest(null, a);
+            return breakdown.owner > 0 || isOwnerInvest(null, a);
           }
           if (filtroTitularInvestimento === 'partner') {
-            return breakdown.yasmin > 0 || isPartnerInvest(null, a);
+            return breakdown.partner > 0 || isPartnerInvest(null, a);
           }
           return true;
         });
@@ -2999,18 +3379,26 @@
           ];
         }
 
+        // Acumula o saldo mais recente conhecido POR CONTA e soma entre contas a cada data,
+        // em vez de somar apenas os "new_amount" que caem exatamente na mesma data — senão o
+        // total do mês "esquece" contas que não foram reavaliadas naquela data específica.
         const sorted = [...valuationsDoTitular].sort((a, b) => a.date.localeCompare(b.date));
-        const mapa = {};
-        sorted.forEach(v => {
-          mapa[v.date] = {
-            date: v.date,
-            total: (mapa[v.date]?.total || 0) + v.new_amount,
-            variacao: (mapa[v.date]?.variacao || 0) + v.variation_amount,
-            label: v.date.split('-').slice(1).join('/')
-          };
-        });
+        const saldoPorConta = {};
+        const pontos = [];
+        let i = 0;
+        while (i < sorted.length) {
+          const dataAtual = sorted[i].date;
+          let variacaoDoDia = 0;
+          while (i < sorted.length && sorted[i].date === dataAtual) {
+            saldoPorConta[sorted[i].account_id] = sorted[i].new_amount;
+            variacaoDoDia += sorted[i].variation_amount;
+            i++;
+          }
+          const total = Object.values(saldoPorConta).reduce((s, v) => s + v, 0);
+          pontos.push({ date: dataAtual, total, variacao: variacaoDoDia, label: dataAtual.split('-').slice(1).join('/') });
+        }
 
-        return Object.values(mapa);
+        return pontos;
       }, [investmentValuations, totalInvestidoAtual, filtroTitularInvestimento, ownerName, partnerName, hojeStr]);
 
       // 12. MÓDULO DE RELATÓRIOS E DASHBOARDS ANALÍTICOS (MOTOR DE CÁLCULO REATIVO)
@@ -3037,98 +3425,10 @@
           periodoDescricao = `${filtroSemestre}º Semestre de ${selectedYear}`;
         }
 
-        // Regra de Rateio e Titularidade do Filtro Global:
-        // - 'ambos': 100% de tudo
-        // - 'owner' (Edvan): 100% Edvan + 50% Compartilhado + 0% Yasmin
-        // - 'partner' (Yasmin): 100% Yasmin + 50% Compartilhado + 0% Edvan
-        const getWeight = (t) => {
-          const isEd = isOwnerInvest(t, null);
-          const isYas = isPartnerInvest(t, null);
-          const own = t.ownership_type;
-
-          if (filtroVisaoRelatorios === 'ambos') return 1.0;
-
-          if (filtroVisaoRelatorios === 'owner') {
-            if (isEd && !isYas) return 1.0;
-            if (isYas && !isEd) return 0.0;
-            if (own === 'owner_only') return 1.0;
-            if (own === 'partner_only') return 0.0;
-            if (own === 'shared_50_50' || t.titular === 'Ambos') return 0.5;
-            return 1.0;
-          }
-
-          if (filtroVisaoRelatorios === 'partner') {
-            if (isYas && !isEd) return 1.0;
-            if (isEd && !isYas) return 0.0;
-            if (own === 'partner_only') return 1.0;
-            if (own === 'owner_only') return 0.0;
-            if (own === 'shared_50_50' || t.titular === 'Ambos') return 0.5;
-            return 0.0;
-          }
-
-          return 1.0;
-        };
-
-        const getRecurringPatternWeight = (pattern) => {
-          if (!pattern) return 0;
-          if (filtroVisaoRelatorios === 'ambos') return 1.0;
-          const isEd = isOwnerInvest(pattern, null);
-          const isYas = isPartnerInvest(pattern, null);
-          const own = pattern.ownership_type;
-          const tit = (pattern.titular || '').toLowerCase();
-
-          if (filtroVisaoRelatorios === 'owner') {
-            if (isEd && !isYas) return 1.0;
-            if (isYas && !isEd) return 0.0;
-            if (tit === 'edvan' || tit === (ownerName || 'edvan').toLowerCase()) return 1.0;
-            if (tit === 'yasmin' || tit === (partnerName || 'yasmin').toLowerCase()) return 0.0;
-            if (own === 'owner_only') return 1.0;
-            if (own === 'partner_only') return 0.0;
-            if (own === 'shared_50_50' || tit === 'ambos') return 0.5;
-            return 1.0;
-          }
-
-          if (filtroVisaoRelatorios === 'partner') {
-            if (isYas && !isEd) return 1.0;
-            if (isEd && !isYas) return 0.0;
-            if (tit === 'yasmin' || tit === (partnerName || 'yasmin').toLowerCase()) return 1.0;
-            if (tit === 'edvan' || tit === (ownerName || 'edvan').toLowerCase()) return 0.0;
-            if (own === 'partner_only') return 1.0;
-            if (own === 'owner_only') return 0.0;
-            if (own === 'shared_50_50' || tit === 'ambos') return 0.5;
-            return 0.0;
-          }
-
-          return 1.0;
-        };
-
-        const getAccountBudgetWeight = (a) => {
-          if (!a) return 0;
-          if (filtroVisaoRelatorios === 'ambos') return 1.0;
-          const isEd = isOwnerInvest(null, a);
-          const isYas = isPartnerInvest(null, a);
-          const tit = (a.titular || '').toLowerCase();
-
-          if (filtroVisaoRelatorios === 'owner') {
-            if (isEd && !isYas) return 1.0;
-            if (isYas && !isEd) return 0.0;
-            if (tit === 'edvan' || tit === (ownerName || 'edvan').toLowerCase()) return 1.0;
-            if (tit === 'yasmin' || tit === (partnerName || 'yasmin').toLowerCase()) return 0.0;
-            if (tit === 'ambos') return 0.5;
-            return 1.0;
-          }
-
-          if (filtroVisaoRelatorios === 'partner') {
-            if (isYas && !isEd) return 1.0;
-            if (isEd && !isYas) return 0.0;
-            if (tit === 'yasmin' || tit === (partnerName || 'yasmin').toLowerCase()) return 1.0;
-            if (tit === 'edvan' || tit === (ownerName || 'edvan').toLowerCase()) return 0.0;
-            if (tit === 'ambos') return 0.5;
-            return 0.0;
-          }
-
-          return 1.0;
-        };
+        // Regra de Rateio e Titularidade do Filtro Global (Centralizado via getTitularWeight)
+        const getWeight = (t) => getTitularWeight(t, null, filtroVisaoRelatorios);
+        const getRecurringPatternWeight = (pattern) => getTitularWeight(pattern, null, filtroVisaoRelatorios);
+        const getAccountBudgetWeight = (a) => getTitularWeight(null, a, filtroVisaoRelatorios);
 
         const accountMap = new Map(accounts.map(a => [a.id, a]));
 
@@ -3501,30 +3801,30 @@
               const isInvest = a.account_type === 'ASSET' && (a.subtype === 'investment' || (a.name || '').toLowerCase().includes('invest'));
               
               if (isInvest) {
-                let edVal = 0, yasVal = 0, ambVal = 0;
+                let ownerVal = 0, partnerVal = 0, ambVal = 0;
                 postings.forEach(p => {
                   if (p.account_id !== a.id) return;
                   const t = transactions.find(trans => trans.id === p.transaction_id);
                   if (!t || (t.date && t.date > lastDayStr)) return;
                   const amt = Math.abs(Number(p.amount)) || 0;
-                  if (isOwnerInvest(t, a)) edVal += amt;
-                  else if (isPartnerInvest(t, a)) yasVal += amt;
-                  else if (Math.abs(amt - 28304) < 2) edVal += amt;
-                  else if (Math.abs(amt - 19091) < 2) yasVal += amt;
+                  if (isOwnerInvest(t, a)) ownerVal += amt;
+                  else if (isPartnerInvest(t, a)) partnerVal += amt;
+                  else if (Math.abs(amt - 28304) < 2) ownerVal += amt;
+                  else if (Math.abs(amt - 19091) < 2) partnerVal += amt;
                   else ambVal += amt;
                 });
 
                 // Se não houve transação com data específica, usa o breakdown atual
-                if (edVal === 0 && yasVal === 0 && ambVal === 0 && (selectedYear >= 2026 && mNum >= 8)) {
+                if (ownerVal === 0 && partnerVal === 0 && ambVal === 0 && (selectedYear >= 2026 && mNum >= 8)) {
                   const bd = getInvestimentoTitularBreakdown(a.id);
-                  edVal = bd.edvan;
-                  yasVal = bd.yasmin;
+                  ownerVal = bd.owner;
+                  partnerVal = bd.partner;
                   ambVal = bd.ambos;
                 }
 
-                if (filtroVisaoRelatorios === 'owner') nwMes += edVal;
-                else if (filtroVisaoRelatorios === 'partner') nwMes += yasVal;
-                else nwMes += (edVal + yasVal + ambVal);
+                if (filtroVisaoRelatorios === 'owner') nwMes += ownerVal;
+                else if (filtroVisaoRelatorios === 'partner') nwMes += partnerVal;
+                else nwMes += (ownerVal + partnerVal + ambVal);
               } else {
                 let balAccAteMes = 0;
                 postings.forEach(p => {
@@ -3647,8 +3947,8 @@
           const isInvest = a.account_type === 'ASSET' && (a.subtype === 'investment' || (a.name || '').toLowerCase().includes('invest'));
           if (isInvest) {
             const bd = getInvestimentoTitularBreakdown(a.id);
-            if (filtroVisaoRelatorios === 'owner') return sum + bd.edvan;
-            if (filtroVisaoRelatorios === 'partner') return sum + bd.yasmin;
+            if (filtroVisaoRelatorios === 'owner') return sum + bd.owner;
+            if (filtroVisaoRelatorios === 'partner') return sum + bd.partner;
             return sum + bd.geral;
           }
 
@@ -3859,61 +4159,7 @@
           {!isAuthenticated && (
             <div className="fixed inset-0 z-[999999] bg-slate-950/95 backdrop-blur-md flex flex-col items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in">
               
-              {/* MODAL DE MFA INTERCEPTION OBRIGATÓRIO PARA SUPER ADMIN */}
-              {mfaRequired ? (
-                <div className="w-full max-w-md bg-slate-900 border border-indigo-500/40 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 text-center animate-in zoom-in-95">
-                  <div className="w-16 h-16 rounded-3xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 text-2xl mx-auto shadow-xl shadow-amber-500/10">
-                    👑
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-black text-white tracking-tight">Autenticação Multifator (MFA)</h2>
-                    <p className="text-xs text-amber-300 font-bold mt-1 uppercase tracking-wider">
-                      Privilégio Elevado: Super Admin da Plataforma
-                    </p>
-                    <p className="text-xs text-slate-400 mt-2">
-                      Insira o código de verificação de 6 dígitos do seu aplicativo autenticador (Google Authenticator / Authy).
-                    </p>
-                  </div>
-
-                  {/* ALERTA DE FEEDBACK INLINE NO CARD */}
-                  {toastMsg && (
-                    <div className="p-3 rounded-2xl bg-indigo-950/90 border border-indigo-500/60 text-indigo-200 text-xs font-semibold flex items-center gap-2.5 animate-in fade-in">
-                      <span className="text-base shrink-0">🔔</span>
-                      <span className="flex-1 text-left">{toastMsg}</span>
-                    </div>
-                  )}
-
-                  <div className="space-y-4">
-                    <input
-                      type="text"
-                      maxLength="6"
-                      autoFocus
-                      placeholder="000000"
-                      value={mfaCode}
-                      onChange={e => setMfaCode(e.target.value.replace(/\D/g, ''))}
-                      className="w-full text-center font-mono font-black text-3xl tracking-widest p-3.5 bg-slate-800 border border-indigo-500/50 rounded-2xl text-white outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-
-                    <button
-                      disabled={mfaLoading || mfaCode.length < 6}
-                      onClick={() => handleVerifyMfa(mfaCode)}
-                      className="w-full py-4 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-slate-950 font-black rounded-2xl transition shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2 tap-target disabled:opacity-50 text-sm"
-                    >
-                      {mfaLoading ? 'Validando MFA...' : 'Verificar & Acessar Console'}
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setMfaRequired(false);
-                        setMfaCode('');
-                      }}
-                      className="text-xs text-slate-400 hover:text-white transition font-semibold"
-                    >
-                      Voltar ao Login
-                    </button>
-                  </div>
-                </div>
-              ) : authMode === 'redefinir_senha' ? (
+              {authMode === 'redefinir_senha' ? (
                 /* CARD DE DEFINIÇÃO DE NOVA SENHA (FORÇA >= 12 CARACTERES) */
                 <div className="w-full max-w-md bg-slate-900 border border-indigo-500/40 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 animate-in zoom-in-95">
                   <div className="text-center space-y-2">
@@ -4225,7 +4471,7 @@
           <aside className="hidden md:flex flex-col justify-between w-64 lg:w-72 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 h-screen shrink-0 z-30 transition-colors">
             <div className="p-5 flex flex-col gap-6">
               
-              {/* BRAND HEADER COM AVATAR DINÂMICO */}
+              {/* BRAND HEADER COM IDENTIFICAÇÃO DO USUÁRIO LOGADO */}
               <div className="flex items-center gap-3">
                 <button
                   type="button"
@@ -4241,14 +4487,20 @@
                     />
                   ) : (
                     <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center text-white font-black text-sm shadow-lg shadow-indigo-500/20 group-hover:scale-105 transition">
-                      {(userProfile.nome_completo || userProfile.nome || ownerName || 'U').slice(0, 2).toUpperCase()}
+                      {(userProfile.nome_completo || userProfile.nome || ownerName || authUser?.email || 'U').slice(0, 2).toUpperCase()}
                     </div>
                   )}
                 </button>
-                <div className="min-w-0">
-                  <h1 className="font-extrabold text-sm tracking-tight text-slate-900 dark:text-white leading-tight">Finanças Duo</h1>
-                  <span className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 truncate block">
-                    {partnerName ? `${ownerName || 'Eu'} & ${partnerName}` : (ownerName || 'Meu Espaço')}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Bem-vindo(a),</span>
+                    {isSuperAdmin && <span className="text-[9px] bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-bold px-1.5 py-0.2 rounded-md">Admin</span>}
+                  </div>
+                  <h2 className="font-black text-sm tracking-tight text-slate-900 dark:text-white leading-tight truncate" title={userProfile.nome_completo || userProfile.nome || ownerName || 'Usuário'}>
+                    {userProfile.nome_completo || userProfile.nome || ownerName || 'Usuário'}
+                  </h2>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono block truncate" title={authUser?.email || userProfile.email}>
+                    {authUser?.email || userProfile.email || 'Conectado'}
                   </span>
                 </div>
               </div>
@@ -4351,14 +4603,17 @@
                   />
                 ) : (
                   <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
-                    {(userProfile.nome_completo || userProfile.nome || ownerName || 'U').slice(0, 1).toUpperCase()}
+                    {(userProfile.nome_completo || userProfile.nome || ownerName || authUser?.email || 'U').slice(0, 1).toUpperCase()}
                   </div>
                 )}
                 <div>
-                  <h1 className="font-extrabold text-xs tracking-tight text-slate-900 dark:text-white">Finanças Duo</h1>
-                  <span className="text-[10px] text-slate-500 font-mono block truncate max-w-[110px]">
-                    {ownerName || 'Meu Espaço'}
-                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[9px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider block leading-none">Bem-vindo(a),</span>
+                    {isSuperAdmin && <span className="text-[8px] bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-bold px-1 rounded">Admin</span>}
+                  </div>
+                  <h1 className="font-extrabold text-xs tracking-tight text-slate-900 dark:text-white truncate max-w-[125px]">
+                    {userProfile.nome_completo || userProfile.nome || ownerName || 'Usuário'}
+                  </h1>
                 </div>
               </button>
             </div>
@@ -4389,6 +4644,22 @@
               </button>
             </div>
           </div>
+
+          {/* SELETOR DE FAMÍLIA MOBILE (EXIBIDO SE POSSUIR MAIS DE 1 FAMÍLIA) */}
+          {familias && familias.length > 1 && (
+            <div className="md:hidden bg-indigo-50 dark:bg-indigo-950/80 px-3.5 py-2 border-b border-indigo-200 dark:border-indigo-800 flex items-center justify-between gap-2 z-30">
+              <span className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300 shrink-0">🏠 Família:</span>
+              <select
+                value={familiaAtiva?.id || ''}
+                onChange={e => handleTrocarFamiliaAtiva(e.target.value)}
+                className="flex-1 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-bold rounded-xl px-2.5 py-1 border border-indigo-300 dark:border-indigo-700 outline-none text-xs truncate shadow-sm"
+              >
+                {familias.map(f => (
+                  <option key={f.id} value={f.id}>{f.nome || 'Família'}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* DRAWER MOBILE SIDEBAR */}
           {mobileSidebarOpen && (
@@ -4475,7 +4746,21 @@
               {/* TOP BAR: SELEÇÃO DE PERÍODO & STATUS */}
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-slate-900 p-4 sm:px-6 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm">
                 <div className="flex items-center gap-3 flex-wrap">
-                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Período:</span>
+                  {/* SAUDAÇÃO COM NOME E E-MAIL DO USUÁRIO LOGADO */}
+                  <div className="flex items-center gap-2.5 bg-slate-50 dark:bg-slate-800/60 px-3.5 py-1.5 rounded-2xl border border-slate-200/80 dark:border-slate-700/60">
+                    <span className="text-sm">👋</span>
+                    <div>
+                      <span className="text-[9px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider block leading-none">Bem-vindo(a),</span>
+                      <span className="text-xs font-black text-slate-900 dark:text-white leading-tight">
+                        {userProfile.nome_completo || userProfile.nome || ownerName || authUser?.email?.split('@')[0] || 'Usuário'}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono hidden md:inline ml-1" title={authUser?.email || userProfile.email}>
+                      ({authUser?.email || userProfile.email || 'Conectado'})
+                    </span>
+                  </div>
+
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider hidden lg:inline">Período:</span>
                   <select 
                     value={selectedMonth} 
                     onChange={e => { triggerHaptic('light'); setSelectedMonth(parseInt(e.target.value, 10)); }}
@@ -4495,6 +4780,22 @@
                 </div>
 
                 <div className="flex items-center gap-3 flex-wrap">
+                  {/* SELETOR DE FAMÍLIA ATIVA (EXIBIDO APENAS SE O USUÁRIO PERTENCER A MAIS DE 1 FAMÍLIA) */}
+                  {familias && familias.length > 1 && (
+                    <div className="flex items-center gap-1.5 bg-indigo-50/80 dark:bg-indigo-950/60 p-1 rounded-2xl border border-indigo-200 dark:border-indigo-800/80 shadow-sm">
+                      <span className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300 pl-2">🏠 Família:</span>
+                      <select
+                        value={familiaAtiva?.id || ''}
+                        onChange={e => handleTrocarFamiliaAtiva(e.target.value)}
+                        className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-bold rounded-xl px-3 py-1.5 border border-indigo-300 dark:border-indigo-700 outline-none text-xs shadow-sm cursor-pointer"
+                      >
+                        {familias.map(f => (
+                          <option key={f.id} value={f.id}>{f.nome || 'Família'}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
                   <button
                     onClick={() => {
                       triggerHaptic('light');
@@ -4570,10 +4871,12 @@
 
                   <div className="flex flex-wrap gap-3 pt-3">
                     <button
+                      type="button"
+                      disabled={loadingSmartDefaults}
                       onClick={provisionarSmartDefaults}
-                      className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-2xl shadow-lg shadow-indigo-600/30 transition flex items-center gap-2 tap-target"
+                      className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-2xl shadow-lg shadow-indigo-600/30 transition flex items-center gap-2 tap-target disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <SparklesIcon /> Carregar Plano de Contas Completo
+                      <SparklesIcon /> {loadingSmartDefaults ? 'Criando Categorias...' : 'Carregar Plano de Contas Completo'}
                     </button>
 
                     <button
@@ -4629,10 +4932,12 @@
                           </p>
                         </div>
                         <button
+                          type="button"
+                          disabled={loadingSmartDefaults}
                           onClick={provisionarSmartDefaults}
-                          className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-2xl shadow-md shadow-indigo-600/30 transition flex items-center justify-center gap-2 tap-target"
+                          className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-2xl shadow-md shadow-indigo-600/30 transition flex items-center justify-center gap-2 tap-target disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          <SparklesIcon /> Provisionar Contas
+                          <SparklesIcon /> {loadingSmartDefaults ? 'Provisionando...' : 'Provisionar Contas'}
                         </button>
                       </div>
 
@@ -4934,6 +5239,21 @@
                                     >
                                       <EditIcon />
                                     </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        triggerHaptic('medium');
+                                        setModalExcluirVencimento({
+                                          show: true,
+                                          item,
+                                          modo: 'apenas_esta'
+                                        });
+                                      }}
+                                      className="p-1 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg transition"
+                                      title="Excluir este vencimento ou a série toda"
+                                    >
+                                      <TrashIcon />
+                                    </button>
                                   </div>
                                 </div>
                                 
@@ -4976,6 +5296,24 @@
               {/* ABA 2: DIÁRIO */}
               {activeTab === 'diario' && (
                 <div className="space-y-4">
+                  
+                  {/* BANNER DE PERFORMANCE / HISTÓRICO COMPLETO NO DIÁRIO */}
+                  {!historicoCompletoCarregado && (
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 bg-indigo-50/70 dark:bg-indigo-950/50 rounded-2xl border border-indigo-200/80 dark:border-indigo-800/80 text-xs">
+                      <div className="flex items-center gap-2 text-indigo-800 dark:text-indigo-300 font-semibold">
+                        <span>⚡</span>
+                        <span>Exibindo lançamentos dos últimos 6 meses. Para registros anteriores:</span>
+                      </div>
+                      <button
+                        onClick={() => carregarHistoricoCompleto(true)}
+                        disabled={carregandoHistorico}
+                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-sm text-xs transition tap-target disabled:opacity-50 shrink-0"
+                      >
+                        {carregandoHistorico ? 'Carregando Histórico...' : 'Carregar Todo o Histórico 📚'}
+                      </button>
+                    </div>
+                  )}
+
                   <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm space-y-4">
                     
                     {/* CABEÇALHO DO DIÁRIO */}
@@ -5035,14 +5373,14 @@
                             onClick={() => { triggerHaptic('light'); setFiltroTitularDiario(ownerName || 'Eu'); }}
                             className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 ${filtroTitularDiario === (ownerName || 'Eu') ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'}`}
                           >
-                            <span>👤</span> {ownerName || 'Eu'} ({diarioCounters.countEdvan})
+                            <span>👤</span> {ownerName || 'Eu'} ({diarioCounters.countOwner})
                           </button>
                           {partnerName && (
                             <button
                               onClick={() => { triggerHaptic('light'); setFiltroTitularDiario(partnerName); }}
                               className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 ${filtroTitularDiario === partnerName ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'}`}
                             >
-                              <span>👤</span> {partnerName} ({diarioCounters.countYasmin})
+                              <span>👤</span> {partnerName} ({diarioCounters.countPartner})
                             </button>
                           )}
                           {partnerName && (
@@ -5169,11 +5507,11 @@
                                       {/* BADGE DE RATEIO */}
                                       <span className={`block text-[10px] font-semibold px-2 py-0.5 rounded-md ${
                                         t.ownership_type === 'shared_50_50' ? 'bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-300' :
-                                        (t.ownership_type === 'partner_only' || isPartnerInvest(t, null)) ? 'bg-pink-50 dark:bg-pink-950/40 text-pink-600 dark:text-pink-300' :
+                                        (t.ownership_type === 'partner_only' || (partnerName && t.titular === partnerName)) ? 'bg-pink-50 dark:bg-pink-950/40 text-pink-600 dark:text-pink-300' :
                                         'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-300'
                                       }`}>
                                         {t.ownership_type === 'shared_50_50' ? 'Dividido 50%' :
-                                         (t.ownership_type === 'partner_only' || isPartnerInvest(t, null)) ? `100% ${partnerName}` : `100% ${ownerName}`}
+                                         (t.ownership_type === 'partner_only' || (partnerName && t.titular === partnerName)) ? `100% ${partnerName}` : `100% ${ownerName}`}
                                       </span>
                                     </td>
 
@@ -5636,6 +5974,7 @@
                             <th className="p-4 w-32">Data</th>
                             <th className="p-4">Categoria & Descrição</th>
                             <th className="p-4 w-44">Tipo de Rateio</th>
+                            <th className="p-4 w-32 text-center">Status</th>
                             <th className="p-4 text-right w-36">Valor Total</th>
                             <th className="p-4 text-right w-40 text-purple-600 dark:text-purple-400">Parte de {partnerName}</th>
                             <th className="p-4 text-center w-24">Ações</th>
@@ -5643,7 +5982,7 @@
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                           {acertoDoMes.itens.length === 0 ? (
-                            <tr><td colSpan={6} className="p-16 text-center text-slate-400 text-xs">Nenhuma despesa compartilhada ou do parceiro registrada neste mês.</td></tr>
+                            <tr><td colSpan={7} className="p-16 text-center text-slate-400 text-xs">Nenhuma despesa compartilhada registrada neste mês.</td></tr>
                           ) : (
                             acertoDoMes.itens.map(item => (
                               <tr key={item.transaction.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition">
@@ -5663,6 +6002,15 @@
                                     'bg-pink-100 dark:bg-pink-950/80 text-pink-700 dark:text-pink-300'
                                   }`}>
                                     {item.ownership_type === 'shared_50_50' ? 'Dividido (50%)' : `100% de ${partnerName}`}
+                                  </span>
+                                </td>
+                                <td className="p-4 text-center whitespace-nowrap">
+                                  <span className={`text-[11px] font-bold px-2.5 py-1 rounded-lg ${
+                                    item.status === 'pending'
+                                      ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300'
+                                      : 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300'
+                                  }`}>
+                                    {item.status === 'pending' ? '⏳ Pendente' : '✅ Pago'}
                                   </span>
                                 </td>
                                 <td className="p-4 text-right font-mono font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap text-xs">
@@ -6505,6 +6853,23 @@
               {activeTab === 'relatorios' && (
                 <div className="space-y-6">
                   
+                  {/* BANNER DE PERFORMANCE / HISTÓRICO COMPLETO NOS RELATÓRIOS */}
+                  {!historicoCompletoCarregado && (
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 bg-amber-50/80 dark:bg-amber-950/50 rounded-2xl border border-amber-200/80 dark:border-amber-800/80 text-xs">
+                      <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300 font-semibold">
+                        <span>📊</span>
+                        <span>Relatórios consolidando os últimos 6 meses. Para gráficos anuais e consolidados completos:</span>
+                      </div>
+                      <button
+                        onClick={() => carregarHistoricoCompleto(true)}
+                        disabled={carregandoHistorico}
+                        className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl shadow-sm text-xs transition tap-target disabled:opacity-50 shrink-0"
+                      >
+                        {carregandoHistorico ? 'Carregando Histórico...' : 'Carregar Histórico Completo 📚'}
+                      </button>
+                    </div>
+                  )}
+
                   {/* TOP HEADER: TÍTULO & FILTRO GLOBAL DE VISÃO (RATEIO) */}
                   <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
                     <div>
@@ -7760,6 +8125,8 @@
             <AccountFormModal
               account={modalConta.account}
               mode={modalConta.mode}
+              ownerName={ownerName}
+              partnerName={partnerName}
               onClose={() => setModalConta({ show: false, mode: 'create', account: null })}
               onSave={salvarConta}
             />
@@ -7986,6 +8353,95 @@
                     }`}
                   >
                     Salvar Alteração
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL: EXCLUIR VENCIMENTO OU SÉRIE RECORRENTE */}
+          {modalExcluirVencimento.show && modalExcluirVencimento.item && (
+            <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4 z-[99999] animate-in fade-in">
+              <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-md w-full border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4">
+                <div className="flex justify-between items-start border-b border-slate-100 dark:border-slate-800 pb-3">
+                  <div>
+                    <h3 className="font-extrabold text-base text-rose-600 dark:text-rose-400 flex items-center gap-2">
+                      <TrashIcon /> Excluir {modalExcluirVencimento.item.isReceita ? 'Previsão de Receita' : 'Conta a Pagar'}
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5 font-bold">
+                      "{modalExcluirVencimento.item.description}" — {formatarMoeda(modalExcluirVencimento.item.total)}
+                    </p>
+                  </div>
+                  <button 
+                    onClick={() => setModalExcluirVencimento({ show: false, item: null, modo: 'apenas_esta' })} 
+                    className="text-slate-400 hover:text-slate-900 dark:hover:text-white p-1 tap-target"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-600 dark:text-slate-300">
+                    Escolha o alcance da exclusão para este lançamento:
+                  </p>
+
+                  <div className="space-y-2">
+                    <label className="flex items-start gap-2.5 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 cursor-pointer hover:border-rose-300 dark:hover:border-rose-800 transition">
+                      <input
+                        type="radio"
+                        name="modoExclusaoVencimento"
+                        value="apenas_esta"
+                        checked={modalExcluirVencimento.modo === 'apenas_esta'}
+                        onChange={() => setModalExcluirVencimento({ ...modalExcluirVencimento, modo: 'apenas_esta' })}
+                        className="mt-0.5"
+                      />
+                      <div>
+                        <strong className="text-xs text-slate-900 dark:text-white block">
+                          Excluir apenas este vencimento ({modalExcluirVencimento.item.date.split('-').reverse().slice(0, 2).join('/')})
+                        </strong>
+                        <span className="text-[11px] text-slate-500 block mt-0.5">
+                          Cancela/remove esta ocorrência deste mês sem alterar os próximos meses.
+                        </span>
+                      </div>
+                    </label>
+
+                    {(modalExcluirVencimento.item.is_virtual || modalExcluirVencimento.item.transaction?.recurrence_id) && (
+                      <label className="flex items-start gap-2.5 p-3 rounded-2xl bg-rose-50/50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 cursor-pointer hover:border-rose-400 transition">
+                        <input
+                          type="radio"
+                          name="modoExclusaoVencimento"
+                          value="todas"
+                          checked={modalExcluirVencimento.modo === 'todas'}
+                          onChange={() => setModalExcluirVencimento({ ...modalExcluirVencimento, modo: 'todas' })}
+                          className="mt-0.5"
+                        />
+                        <div>
+                          <strong className="text-xs text-rose-700 dark:text-rose-300 block">
+                            Excluir toda a série recorrente
+                          </strong>
+                          <span className="text-[11px] text-rose-600/80 dark:text-rose-400/80 block mt-0.5">
+                            Cancela e remove a regra de recorrência por completo do sistema.
+                          </span>
+                        </div>
+                      </label>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setModalExcluirVencimento({ show: false, item: null, modo: 'apenas_esta' })}
+                    className="flex-1 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold rounded-2xl text-xs tap-target"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => executarExclusaoVencimento(modalExcluirVencimento.item, modalExcluirVencimento.modo)}
+                    className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-2xl text-xs shadow-lg shadow-rose-600/30 tap-target flex items-center justify-center gap-1.5"
+                  >
+                    <TrashIcon /> Confirmar Exclusão
                   </button>
                 </div>
               </div>
@@ -8346,8 +8802,8 @@
                   <button onClick={() => setConfigOpen(false)} className="text-slate-400 hover:text-slate-900 dark:hover:text-white p-1 tap-target">✕</button>
                 </div>
 
-                {/* ABAS DO MODAL: MEU PERFIL | GESTÃO DA FAMÍLIA */}
-                <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl text-xs font-bold">
+                {/* ABAS DO MODAL: MEU PERFIL | GESTÃO DA FAMÍLIA | EXCLUIR CONTA */}
+                <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl text-xs font-bold gap-1">
                   <button
                     onClick={() => { triggerHaptic('light'); setConfigTab('perfil'); }}
                     className={`flex-1 py-2 rounded-xl transition ${
@@ -8356,7 +8812,7 @@
                         : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
                     }`}
                   >
-                    👤 Meu Perfil
+                    👤 Perfil
                   </button>
                   <button
                     onClick={() => { triggerHaptic('light'); setConfigTab('familia'); }}
@@ -8366,7 +8822,17 @@
                         : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
                     }`}
                   >
-                    🏠 Gestão da Família
+                    🏠 Família
+                  </button>
+                  <button
+                    onClick={() => { triggerHaptic('light'); setConfigTab('excluir'); }}
+                    className={`flex-1 py-2 rounded-xl transition ${
+                      configTab === 'excluir'
+                        ? 'bg-rose-50 dark:bg-rose-950/80 text-rose-600 dark:text-rose-400 shadow-sm border border-rose-200 dark:border-rose-900'
+                        : 'text-slate-500 hover:text-rose-600 dark:hover:text-rose-400'
+                    }`}
+                  >
+                    🗑️ Excluir Conta
                   </button>
                 </div>
 
@@ -8433,12 +8899,17 @@
                           {userProfile.avatar_url && (
                             <button
                               type="button"
-                              onClick={() => {
+                              onClick={async () => {
                                 const upd = { ...userProfile, avatar_url: '' };
                                 setUserProfile(upd);
                                 localStorage.setItem('fin_user_profile', JSON.stringify(upd));
                                 if (supabase && authUser?.id) {
-                                  supabase.from('usuarios').update({ avatar_url: '' }).eq('id', authUser.id);
+                                  try {
+                                    const { error: remPicErr } = await supabase.from('usuarios').update({ avatar_url: '' }).eq('id', authUser.id);
+                                    if (remPicErr) console.warn("Aviso ao remover foto do perfil no banco:", remPicErr.message);
+                                  } catch (e) {
+                                    console.warn("Erro ao remover foto do perfil:", e);
+                                  }
                                 }
                                 showToast("Foto removida.");
                               }}
@@ -8571,7 +9042,7 @@
                       
                       <div className="p-3 bg-white/80 dark:bg-slate-900/80 rounded-xl border border-indigo-100 dark:border-indigo-900/50 space-y-1.5 mt-2">
                         <div className="flex justify-between items-center text-[10px] uppercase font-bold text-slate-400">
-                          <span>ID da Família (Compartilhe para entrar):</span>
+                          <span>ID da Família:</span>
                           <span>{membrosFamilia.length > 0 ? `${membrosFamilia.length} Membro(s)` : '1 Membro'}</span>
                         </div>
                         <div className="flex items-center gap-2">
@@ -8649,6 +9120,63 @@
                   </div>
                 )}
 
+                {/* ABA 3: EXCLUIR MINHA CONTA (LGPD / ZONA DE PERIGO) */}
+                {configTab === 'excluir' && (
+                  <div className="space-y-4">
+                    <div className="p-4 bg-rose-50 dark:bg-rose-950/40 rounded-2xl border border-rose-200 dark:border-rose-900/60 space-y-3">
+                      <div className="flex items-center gap-2 text-rose-700 dark:text-rose-400 font-black text-sm">
+                        <span>⚠️</span>
+                        <h4>Exclusão Definitiva de Conta e Dados Pessoais (LGPD)</h4>
+                      </div>
+                      <p className="text-xs text-rose-800 dark:text-rose-300 leading-relaxed">
+                        Ao solicitar a exclusão da sua conta, o sistema processará a remoção definitiva dos seus dados nos seguintes termos:
+                      </p>
+                      <ul className="text-[11px] text-rose-700 dark:text-rose-400 list-disc list-inside space-y-1.5 font-medium">
+                        <li>
+                          <strong>Espaço Pessoal (Solo):</strong> Se você for o único membro da família, todos os lançamentos, contas bancárias, orçamentos e históricos serão <span className="underline font-bold">permanentemente apagados</span>.
+                        </li>
+                        <li>
+                          <strong>Espaço Familiar Compartilhado:</strong> Se outros membros participam da sua família, seu acesso e perfil serão desvinculados, preservando o histórico financeiro compartilhado para os demais membros.
+                        </li>
+                        <li>
+                          <strong>Perfil Pessoal:</strong> Seu cadastro pessoal, nome, e-mail e configurações de usuário serão totalmente apagados da base.
+                        </li>
+                      </ul>
+                    </div>
+
+                    <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3">
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                        Para confirmar, digite <strong className="text-rose-600 font-mono font-black">EXCLUIR</strong> no campo abaixo:
+                      </label>
+                      <input
+                        type="text"
+                        value={exclusaoContaInput}
+                        onChange={e => setExclusaoContaInput(e.target.value)}
+                        placeholder="Digite EXCLUIR"
+                        className="w-full p-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl font-mono text-sm font-bold text-rose-600 dark:text-rose-400 outline-none focus:border-rose-500 text-center uppercase tracking-widest"
+                      />
+                      <button
+                        type="button"
+                        disabled={excluindoConta || exclusaoContaInput.trim().toUpperCase() !== 'EXCLUIR'}
+                        onClick={handleExcluirConta}
+                        className="w-full py-3.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-2xl shadow-lg shadow-rose-600/30 tap-target text-xs transition flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {excluindoConta ? (
+                          <>
+                            <span className="animate-spin text-sm">⏳</span>
+                            <span>Excluindo Dados Definitivamente...</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>🗑️</span>
+                            <span>Confirmar Exclusão Definitiva da Conta</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* FOOTER DO MODAL: BOTÃO DE LOGOUT */}
                 <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
                   <button
@@ -8720,7 +9248,12 @@
       });
 
       const [valor, setValor] = useState(editingTransacao?.total || '');
-      const [ownershipType, setOwnershipType] = useState(editingTransacao?.trans?.ownership_type || 'owner_only');
+      const [ownershipType, setOwnershipType] = useState(() => {
+        if (editingTransacao?.trans?.ownership_type) return editingTransacao.trans.ownership_type;
+        if (editingTransacao?.trans?.titular === 'Ambos') return 'shared_50_50';
+        if (partnerName && editingTransacao?.trans?.titular === partnerName) return 'partner_only';
+        return 'owner_only';
+      });
 
       // Troca dinâmica de tipo de operação com ajuste inteligente da categoria
       const handleOpTypeChange = (newOp) => {
@@ -8752,7 +9285,7 @@
         if (!isRecurring || recDurationMode !== 'meses') return null;
         const [sY, sM, sD] = date.split('-').map(Number);
         const dayOfMonth = sD || 10;
-        const d = new Date(sY, sM - 1 + mesesVal, dayOfMonth);
+        const d = addMonthsClamped(sY, sM - 1, dayOfMonth, mesesVal);
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       }, [isRecurring, recDurationMode, date, mesesVal]);
 
@@ -8821,16 +9354,16 @@
                     type="button"
                     onClick={() => {
                       triggerHaptic('light');
-                      setTitular(ownerName);
-                      if (!editingTransacao) setOwnershipType('owner_only');
+                      setTitular(ownerName || 'Eu');
+                      setOwnershipType('owner_only');
                     }}
                     className={`py-2 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                      titular === ownerName
+                      (titular === ownerName || (!titular && ownershipType === 'owner_only'))
                         ? 'bg-indigo-600 text-white shadow-md'
                         : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                     }`}
                   >
-                    <span>👤</span> {ownerName}
+                    <span>👤</span> {ownerName || 'Eu'}
                   </button>
 
                   <button
@@ -8838,10 +9371,10 @@
                     onClick={() => {
                       triggerHaptic('light');
                       setTitular(partnerName);
-                      if (!editingTransacao) setOwnershipType('partner_only');
+                      setOwnershipType('partner_only');
                     }}
                     className={`py-2 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                      titular === partnerName
+                      titular === partnerName || ownershipType === 'partner_only'
                         ? 'bg-purple-600 text-white shadow-md'
                         : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                     }`}
@@ -8854,10 +9387,10 @@
                     onClick={() => {
                       triggerHaptic('light');
                       setTitular('Ambos');
-                      if (!editingTransacao) setOwnershipType('shared_50_50');
+                      setOwnershipType('shared_50_50');
                     }}
                     className={`py-2 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                      titular === 'Ambos'
+                      titular === 'Ambos' || ownershipType === 'shared_50_50'
                         ? 'bg-slate-800 dark:bg-slate-700 text-white shadow-md'
                         : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                     }`}
@@ -9016,7 +9549,11 @@
                   <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-200 dark:bg-slate-900 rounded-xl">
                     <button
                       type="button"
-                      onClick={() => { triggerHaptic('light'); setOwnershipType('owner_only'); }}
+                      onClick={() => {
+                        triggerHaptic('light');
+                        setOwnershipType('owner_only');
+                        setTitular(ownerName || 'Eu');
+                      }}
                       className={`py-2 px-1 rounded-lg text-xs font-bold transition ${
                         ownershipType === 'owner_only'
                           ? 'bg-white dark:bg-indigo-600 text-slate-900 dark:text-white shadow-sm'
@@ -9028,7 +9565,11 @@
 
                     <button
                       type="button"
-                      onClick={() => { triggerHaptic('light'); setOwnershipType('shared_50_50'); }}
+                      onClick={() => {
+                        triggerHaptic('light');
+                        setOwnershipType('shared_50_50');
+                        setTitular('Ambos');
+                      }}
                       className={`py-2 px-1 rounded-lg text-xs font-bold transition ${
                         ownershipType === 'shared_50_50'
                           ? 'bg-purple-600 text-white shadow-sm'
@@ -9040,7 +9581,11 @@
 
                     <button
                       type="button"
-                      onClick={() => { triggerHaptic('light'); setOwnershipType('partner_only'); }}
+                      onClick={() => {
+                        triggerHaptic('light');
+                        setOwnershipType('partner_only');
+                        setTitular(partnerName);
+                      }}
                       className={`py-2 px-1 rounded-lg text-xs font-bold transition ${
                         ownershipType === 'partner_only'
                           ? 'bg-pink-600 text-white shadow-sm'
@@ -9927,7 +10472,7 @@
     }
 
     // Componente de Criação / Edição de Conta & Categoria
-    function AccountFormModal({ account, mode, onClose, onSave }) {
+    function AccountFormModal({ account, mode, ownerName, partnerName, onClose, onSave }) {
       const [name, setName] = useState(account?.name || '');
       const [accountType, setAccountType] = useState(account?.account_type || 'EXPENSE');
       const [subtype, setSubtype] = useState(account?.subtype || 'variable_expense');
@@ -10098,14 +10643,7 @@
     }
 
     function RecurrenceFormModal({ pattern, accounts, ownerName, partnerName, onClose, onSave, formatarMoeda }) {
-      const existingParts = useMemo(() => {
-        const parts = {};
-        (pattern?.rrule || '').replace(/^RRULE:/i, '').split(';').forEach(p => {
-          const [k, v] = p.split('=');
-          if (k && v) parts[k.trim().toUpperCase()] = v.trim();
-        });
-        return parts;
-      }, [pattern]);
+      const parsedRRule = useMemo(() => parseRRule(pattern?.rrule), [pattern]);
 
       const [desc, setDesc] = useState(pattern?.description || '');
       const [opType, setOpType] = useState(() => {
@@ -10121,13 +10659,13 @@
         return p ? p.amount : 100;
       });
 
-      const [freq, setFreq] = useState(existingParts.FREQ || 'MONTHLY');
-      const [dayOfMonth, setDayOfMonth] = useState(parseInt(existingParts.BYMONTHDAY || '10', 10));
+      const [freq, setFreq] = useState(parsedRRule.freq || 'MONTHLY');
+      const [dayOfMonth, setDayOfMonth] = useState(parsedRRule.byMonthDay || 10);
       const [startDate, setStartDate] = useState(pattern?.start_date || new Date().toISOString().split('T')[0]);
       
       // Duração e Quantidade de Meses
-      const [durationMode, setDurationMode] = useState(() => (existingParts.COUNT || pattern?.end_date ? 'meses' : 'continua'));
-      const [monthCount, setMonthCount] = useState(() => parseInt(existingParts.COUNT || '12', 10));
+      const [durationMode, setDurationMode] = useState(() => (parsedRRule.count || pattern?.end_date ? 'meses' : 'continua'));
+      const [monthCount, setMonthCount] = useState(() => parsedRRule.count || 12);
 
       const [titular, setTitular] = useState(pattern?.titular || 'Ambos');
       const [ownershipType, setOwnershipType] = useState(pattern?.ownership_type || 'owner_only');
@@ -10164,7 +10702,7 @@
       const dataTerminoEstimada = useMemo(() => {
         if (durationMode !== 'meses' || freq !== 'MONTHLY') return null;
         const [sY, sM, sD] = startDate.split('-').map(Number);
-        const d = new Date(sY, sM - 1 + mesesVal, Math.min(sD, dayOfMonth || 10));
+        const d = addMonthsClamped(sY, sM - 1, Math.min(sD, dayOfMonth || 10), mesesVal);
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       }, [startDate, mesesVal, durationMode, freq, dayOfMonth]);
 
@@ -10395,6 +10933,9 @@
       }
       componentDidCatch(error, info) {
         console.error("ErrorBoundary caught:", error, info);
+        if (window.Sentry && typeof window.Sentry.captureException === 'function') {
+          window.Sentry.captureException(error, { extra: info });
+        }
       }
       render() {
         if (this.state.hasError) {
