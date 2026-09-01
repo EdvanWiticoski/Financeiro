@@ -3116,6 +3116,44 @@
         }
       };
 
+      // Lança (ou estorna, se valorAjuste for negativo do que já existia) o ajuste contábil de
+      // partidas dobradas de uma reavaliação de investimento — usado ao criar, editar e excluir,
+      // para o saldo real da conta (derivado das transações) sempre acompanhar o histórico exibido.
+      const lancarAjusteContabilInvestimento = async (accountId, accName, valorAjuste, tituloDesc, titularEfetivo, dataLancamento, titularParam) => {
+        if (Math.abs(valorAjuste) <= 0.001) return;
+
+        let receitaRendimentoAcc = accounts.find(a => a.account_type === 'REVENUE' && (a.subtype === 'investment' || a.name.toLowerCase().includes('rendimento') || a.name.toLowerCase().includes('invest')));
+        let despesaOscilacaoAcc = accounts.find(a => a.account_type === 'EXPENSE' && (a.name.toLowerCase().includes('variação negativa') || a.name.toLowerCase().includes('oscilação') || a.name.toLowerCase().includes('mercado') || a.name.toLowerCase().includes('invest')));
+        if (!receitaRendimentoAcc) receitaRendimentoAcc = accounts.find(a => a.account_type === 'REVENUE');
+        if (!despesaOscilacaoAcc) despesaOscilacaoAcc = accounts.find(a => a.account_type === 'EXPENSE');
+
+        const absVal = Math.abs(valorAjuste);
+        let rawPostings = [];
+
+        if (valorAjuste > 0 && receitaRendimentoAcc) {
+          rawPostings = [
+            { account_id: accountId, amount: Number(absVal.toFixed(2)) },
+            { account_id: receitaRendimentoAcc.id, amount: -Number(absVal.toFixed(2)) }
+          ];
+        } else if (valorAjuste < 0 && despesaOscilacaoAcc) {
+          rawPostings = [
+            { account_id: despesaOscilacaoAcc.id, amount: Number(absVal.toFixed(2)) },
+            { account_id: accountId, amount: -Number(absVal.toFixed(2)) }
+          ];
+        }
+
+        if (rawPostings.length !== 2) return;
+
+        const efetivoTitular = (titularEfetivo || '').trim().toLowerCase();
+        const partnerLower = (partnerName || '').trim().toLowerCase();
+        const inferredOwnership = efetivoTitular === 'ambos'
+          ? 'shared_50_50'
+          : (partnerLower && efetivoTitular === partnerLower) ? 'partner_only' : 'owner_only';
+
+        const desc = `${tituloDesc}: ${accName} (${valorAjuste > 0 ? '+' : ''}${formatarMoeda(valorAjuste)})`;
+        await salvarTransacao(dataLancamento, desc, rawPostings, inferredOwnership, null, null, null, null, titularParam, 'completed');
+      };
+
       const salvarReavaliacaoInvestimento = async ({ id, accountId, date, previousAmount, newAmount, notes, titular, criarLancamentoContabil }) => {
         const prevVal = Number(previousAmount) || 0;
         const newVal = Number(newAmount) || 0;
@@ -3123,6 +3161,14 @@
         const pct = prevVal > 0 ? ((diff / prevVal) * 100) : (newVal > 0 ? 100 : 0);
         const targetAcc = accounts.find(a => a.id === accountId);
         const accName = targetAcc?.name || 'Investimento';
+
+        // Ao EDITAR uma reavaliação já existente, o lançamento contábil original (criado quando ela
+        // foi registrada pela 1ª vez) não é encontrado/apagado — então, em vez de lançar o "diff" cheio
+        // de novo (o que duplicaria o valor já contabilizado), lança-se só a CORREÇÃO: a diferença entre
+        // a variação nova e a variação que já estava registrada antes da edição.
+        const valuationAnterior = id ? investmentValuations.find(v => v.id === id) : null;
+        const diffJaContabilizado = valuationAnterior ? Number(valuationAnterior.variation_amount) || 0 : 0;
+        const correcao = diff - diffJaContabilizado;
 
         // Dispara celebração (confetes e vibração tátil) quando o Delta for positivo
         if (diff > 0) {
@@ -3155,43 +3201,9 @@
         // LÓGICA CONTÁBIL DE RECONCILIAÇÃO (O DELTA - MARCAÇÃO A MERCADO):
         // É expressamente proibido sobrescrever ou dar UPDATE direto no saldo.
         // O saldo é sempre derivado das transações contábeis de partidas dobradas.
-        if (criarLancamentoContabil && Math.abs(diff) > 0.001) {
-          let receitaRendimentoAcc = accounts.find(a => a.account_type === 'REVENUE' && (a.subtype === 'investment' || a.name.toLowerCase().includes('rendimento') || a.name.toLowerCase().includes('invest')));
-          let despesaOscilacaoAcc = accounts.find(a => a.account_type === 'EXPENSE' && (a.name.toLowerCase().includes('variação negativa') || a.name.toLowerCase().includes('oscilação') || a.name.toLowerCase().includes('mercado') || a.name.toLowerCase().includes('invest')));
-
-          if (!receitaRendimentoAcc) receitaRendimentoAcc = accounts.find(a => a.account_type === 'REVENUE');
-          if (!despesaOscilacaoAcc) despesaOscilacaoAcc = accounts.find(a => a.account_type === 'EXPENSE');
-
-          const absDiff = Math.abs(diff);
-          let rawPostings = [];
-          let desc = '';
-
-          if (diff > 0 && receitaRendimentoAcc) {
-            // Delta Positivo (Lucro): Debita conta de Ativo ("Investimentos") e Credita conta de Receita ("Rendimentos de Investimento")
-            rawPostings = [
-              { account_id: accountId, amount: Number(absDiff.toFixed(2)) },
-              { account_id: receitaRendimentoAcc.id, amount: -Number(absDiff.toFixed(2)) }
-            ];
-            desc = `Rendimento de Investimento: ${accName} (+${formatarMoeda(absDiff)})`;
-          } else if (diff < 0 && despesaOscilacaoAcc) {
-            // Delta Negativo (Prejuízo): Credita conta de Ativo ("Investimentos") e Debita conta de Despesa ("Variação Negativa de Mercado")
-            rawPostings = [
-              { account_id: despesaOscilacaoAcc.id, amount: Number(absDiff.toFixed(2)) },
-              { account_id: accountId, amount: -Number(absDiff.toFixed(2)) }
-            ];
-            desc = `Variação Negativa de Mercado: ${accName} (-${formatarMoeda(absDiff)})`;
-          }
-
-          if (rawPostings.length === 2) {
-            // Ownership derivado do titular efetivo da reavaliação (não pode ser fixo em 'owner_only',
-            // senão toda reavaliação de uma conta da/do parceira(o) é contabilizada como se fosse do titular).
-            const efetivoTitular = (valuationObj.titular || '').trim().toLowerCase();
-            const partnerLower = (partnerName || '').trim().toLowerCase();
-            const inferredOwnership = efetivoTitular === 'ambos'
-              ? 'shared_50_50'
-              : (partnerLower && efetivoTitular === partnerLower) ? 'partner_only' : 'owner_only';
-            await salvarTransacao(date, desc, rawPostings, inferredOwnership, null, null, null, null, titular, 'completed');
-          }
+        if (criarLancamentoContabil) {
+          const prefixoDesc = id ? 'Ajuste de Edição' : (correcao > 0 ? 'Rendimento de Investimento' : 'Variação Negativa de Mercado');
+          await lancarAjusteContabilInvestimento(accountId, accName, correcao, prefixoDesc, valuationObj.titular, date, titular);
         }
 
         if (supabase) {
@@ -3221,7 +3233,17 @@
       };
 
       const excluirReavaliacaoInvestimento = async (id) => {
-        const upd = investmentValuations.filter(v => v.id !== id);
+        const v = investmentValuations.find(x => x.id === id);
+
+        // Estorna o efeito contábil que esta reavaliação gerou (rendimento/oscilação), senão o saldo
+        // real da conta continua refletindo um valor que não existe mais em nenhum histórico visível.
+        if (v) {
+          const targetAcc = accounts.find(a => a.id === v.account_id);
+          const reversao = -(Number(v.variation_amount) || 0);
+          await lancarAjusteContabilInvestimento(v.account_id, targetAcc?.name || 'Investimento', reversao, 'Estorno de Exclusão', v.titular, v.date, v.titular);
+        }
+
+        const upd = investmentValuations.filter(x => x.id !== id);
         setInvestmentValuations(upd);
         localStorage.setItem('fin_invest_val_v3', JSON.stringify(upd));
         if (supabase) {
@@ -3236,12 +3258,12 @@
           }
         }
         triggerHaptic('warning');
-        showToast("Registro de reavaliação removido.");
+        showToast("Registro de reavaliação removido e saldo da conta estornado.");
       };
 
       // Contas de Investimento e Posições Atuais
       const contasInvestimento = useMemo(() => {
-        return accounts.filter(a => a.account_type === 'ASSET' && (a.subtype === 'investment' || a.name.toLowerCase().includes('invest') || a.name.toLowerCase().includes('selic') || a.name.toLowerCase().includes('cdb') || a.name.toLowerCase().includes('ações') || a.name.toLowerCase().includes('fii')));
+        return accounts.filter(a => a.is_active !== false && a.account_type === 'ASSET' && (a.subtype === 'investment' || a.name.toLowerCase().includes('invest') || a.name.toLowerCase().includes('selic') || a.name.toLowerCase().includes('cdb') || a.name.toLowerCase().includes('ações') || a.name.toLowerCase().includes('fii')));
       }, [accounts]);
 
       // Cálculo de Saldo Real por Titular para cada Conta de Investimento
@@ -6595,6 +6617,13 @@
                                       >
                                         <EditIcon />
                                       </button>
+                                      <button
+                                        onClick={() => solicitarExclusaoConta(acc)}
+                                        className="p-1.5 text-slate-400 hover:text-rose-600 rounded-xl transition tap-target"
+                                        title="Excluir ou Inativar esta Conta de Investimento"
+                                      >
+                                        <TrashIcon />
+                                      </button>
                                     </div>
                                   </td>
                                 </tr>
@@ -8127,6 +8156,7 @@
               mode={modalConta.mode}
               ownerName={ownerName}
               partnerName={partnerName}
+              membrosFamilia={membrosFamilia}
               onClose={() => setModalConta({ show: false, mode: 'create', account: null })}
               onSave={salvarConta}
             />
@@ -8755,6 +8785,7 @@
               investmentValuations={investmentValuations}
               ownerName={ownerName}
               partnerName={partnerName}
+              membrosFamilia={membrosFamilia}
               onClose={() => setModalReavaliacao({ show: false, account: null, valuation: null })}
               onSave={salvarReavaliacaoInvestimento}
               formatarMoeda={formatarMoeda}
@@ -9707,11 +9738,21 @@
     }
 
     // Componente Modal de Reavaliação e Atualização Mensal de Investimentos (Marcação a Mercado)
-    function ModalReavaliacaoInvestimento({ initialAccount, valuation, accounts, accountBalances, investmentValuations, ownerName, partnerName, onClose, onSave, formatarMoeda }) {
+    function ModalReavaliacaoInvestimento({ initialAccount, valuation, accounts, accountBalances, investmentValuations, ownerName, partnerName, membrosFamilia, onClose, onSave, formatarMoeda }) {
+      // Nomes reais das pessoas da família (em vez de fixar só titular/parceiro)
+      const nomesFamilia = useMemo(() => {
+        const nomesMembros = (membrosFamilia || []).map(m => m.nome_exibicao).filter(Boolean);
+        const base = nomesMembros.length > 0 ? nomesMembros : [ownerName, partnerName].filter(Boolean);
+        return [...new Set(base)];
+      }, [membrosFamilia, ownerName, partnerName]);
+
       const contasInvest = useMemo(() => {
-        const list = accounts.filter(a => a.account_type === 'ASSET' && (a.subtype === 'investment' || a.name.toLowerCase().includes('invest') || a.name.toLowerCase().includes('selic') || a.name.toLowerCase().includes('cdb') || a.name.toLowerCase().includes('ações') || a.name.toLowerCase().includes('fii')));
-        return list.length > 0 ? list : accounts.filter(a => a.account_type === 'ASSET');
-      }, [accounts]);
+        // Mantém contas inativas na lista apenas se já forem a conta selecionada/em edição,
+        // senão um histórico antigo de uma conta inativada ficaria sem opção correspondente no seletor.
+        const ativaOuAtual = a => a.is_active !== false || a.id === initialAccount?.id || a.id === valuation?.account_id;
+        const list = accounts.filter(a => ativaOuAtual(a) && a.account_type === 'ASSET' && (a.subtype === 'investment' || a.name.toLowerCase().includes('invest') || a.name.toLowerCase().includes('selic') || a.name.toLowerCase().includes('cdb') || a.name.toLowerCase().includes('ações') || a.name.toLowerCase().includes('fii')));
+        return list.length > 0 ? list : accounts.filter(ativaOuAtual).filter(a => a.account_type === 'ASSET');
+      }, [accounts, initialAccount, valuation]);
 
       const [selectedAccountId, setSelectedAccountId] = useState(valuation?.account_id || initialAccount?.id || (contasInvest[0]?.id || ''));
       const targetAccount = accounts.find(a => a.id === selectedAccountId);
@@ -9726,7 +9767,7 @@
       const [novoValor, setNovoValor] = useState(valuation ? String(valuation.new_amount) : '');
       const [titular, setTitular] = useState(valuation?.titular || initialAccount?.titular || 'Ambos');
       const [notes, setNotes] = useState(valuation?.notes || '');
-      const [criarLancamentoContabil, setCriarLancamentoContabil] = useState(!valuation);
+      const [criarLancamentoContabil, setCriarLancamentoContabil] = useState(true);
 
       useEffect(() => {
         if (!valuation && targetAccount) {
@@ -9807,14 +9848,24 @@
               </div>
             </div>
 
-            {/* 1. FOCO ÚNICO: SALDO ATUAL CADASTRADO (TIPOGRAFIA NEUTRA) */}
-            <div className="p-3.5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 text-center space-y-0.5">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                Saldo Atual Registrado no Sistema
+            {/* 1. SALDO ANTERIOR: EDITÁVEL AO CORRIGIR UM LANÇAMENTO JÁ EXISTENTE, FIXO AO CRIAR UM NOVO */}
+            <div className="p-3.5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200/60 dark:border-slate-700/60 space-y-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block text-center">
+                {valuation ? 'Saldo Anterior (antes desta medição)' : 'Saldo Atual Registrado no Sistema'}
               </span>
-              <span className="text-xl font-extrabold font-mono text-slate-700 dark:text-slate-200">
-                {formatarMoeda(valAntesNum)}
-              </span>
+              {valuation ? (
+                <input
+                  type="number"
+                  step="0.01"
+                  value={valorAnterior}
+                  onChange={e => setValorAnterior(e.target.value)}
+                  className="w-full p-2 text-center font-mono font-extrabold text-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl outline-none text-slate-700 dark:text-slate-200"
+                />
+              ) : (
+                <span className="text-xl font-extrabold font-mono text-slate-700 dark:text-slate-200 block text-center">
+                  {formatarMoeda(valAntesNum)}
+                </span>
+              )}
             </div>
 
             {/* 2. CENTRO: DIGITAÇÃO FLUIDA DO NOVO SALDO TOTAL */}
@@ -9910,9 +9961,10 @@
                   onChange={e => setTitular(e.target.value)}
                   className="w-full p-2.5 font-semibold bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none"
                 >
-                  <option value="Ambos">Ambos / Casal</option>
-                  <option value={ownerName}>{ownerName}</option>
-                  <option value={partnerName}>{partnerName}</option>
+                  {nomesFamilia.length > 1 && <option value="Ambos">Ambos / Casal</option>}
+                  {nomesFamilia.map(nome => (
+                    <option key={nome} value={nome}>{nome}</option>
+                  ))}
                 </select>
               </div>
 
@@ -9937,7 +9989,9 @@
                   className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                 />
                 <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-300">
-                  Gerar lançamento contábil no Diário (Partidas Dobradas) para balancear o Patrimônio Líquido
+                  {valuation
+                    ? 'Ajustar o lançamento contábil no Diário para refletir a data/valor corrigidos (deixe marcado para o saldo real da conta mudar junto)'
+                    : 'Gerar lançamento contábil no Diário (Partidas Dobradas) para balancear o Patrimônio Líquido'}
                 </span>
               </label>
             </div>
@@ -10472,7 +10526,7 @@
     }
 
     // Componente de Criação / Edição de Conta & Categoria
-    function AccountFormModal({ account, mode, ownerName, partnerName, onClose, onSave }) {
+    function AccountFormModal({ account, mode, ownerName, partnerName, membrosFamilia, onClose, onSave }) {
       const [name, setName] = useState(account?.name || '');
       const [accountType, setAccountType] = useState(account?.account_type || 'EXPENSE');
       const [subtype, setSubtype] = useState(account?.subtype || 'variable_expense');
@@ -10481,6 +10535,13 @@
       const [isActive, setIsActive] = useState(account?.is_active !== false);
 
       const cores = ['#4f46e5', '#3b82f6', '#10b981', '#059669', '#ea580c', '#ca8a04', '#dc2626', '#8b5cf6', '#ec4899', '#64748b'];
+
+      // Nomes reais das pessoas da família (em vez de fixar só titular/parceiro)
+      const nomesFamilia = useMemo(() => {
+        const nomesMembros = (membrosFamilia || []).map(m => m.nome_exibicao).filter(Boolean);
+        const base = nomesMembros.length > 0 ? nomesMembros : [ownerName, partnerName].filter(Boolean);
+        return [...new Set(base)];
+      }, [membrosFamilia, ownerName, partnerName]);
 
       return (
         <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 z-[99999] animate-in fade-in">
@@ -10577,9 +10638,10 @@
                   onChange={e => setTitular(e.target.value)}
                   className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl outline-none font-semibold"
                 >
-                  <option value={ownerName || 'Eu'}>{ownerName || 'Eu'}</option>
-                  {partnerName && <option value={partnerName}>{partnerName}</option>}
-                  {partnerName && <option value="Ambos">Ambos / Casal</option>}
+                  {nomesFamilia.map(nome => (
+                    <option key={nome} value={nome}>{nome}</option>
+                  ))}
+                  {nomesFamilia.length > 1 && <option value="Ambos">Ambos / Casal</option>}
                 </select>
               </div>
 
